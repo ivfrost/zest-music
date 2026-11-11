@@ -5,8 +5,9 @@ SQLite, and plays the files through `react-native-audio-api` with background pla
 media notification.
 
 I started Zest Music inspired by Vanilla Music. I wanted a more modern, native-feeling Android
-interface and features I had missed, such as album-to-song filtering, tab-scoped search, and a
-configurable response when tapping the currently playing song.
+interface and to smooth out a few personal workflow nitpicks: choosing what happens when tapping the
+currently playing song, making controls easier to reach one-handed (especially for left-handed use),
+and playing a different song without losing the current queue.
 
 Audio files and the SQLite database stay on-device; no account is required. When an artist has
 no MusicBrainz ID, artwork lookup sends its name to MusicBrainz to find one, then uses the ID with
@@ -62,9 +63,9 @@ mode and position persist so playback can be restored after a restart.
 
 - Tables: `artists`, `releases`, `songs`, `playlists`. Songs carry duration, track number, play
   count and last played at.
-- For better artist/release matching, tag files with MusicBrainz Picard before scanning. Zest Music
-  reads embedded MusicBrainz IDs, falls back to tag names, and does not edit files. Missing values
-  use `Unknown Artist` / `Unknown Album`.
+- Metadata editing is intentionally out of scope; use MusicBrainz Picard to edit tags before
+  scanning. Zest Music reads embedded MusicBrainz IDs, falls back to tag names, and does not modify
+  files. Missing values use `Unknown Artist` / `Unknown Album`.
 - Play statistics are written once per actual playback and read through a small module store, so the
   UI never waits on the database for ranking.
 
@@ -99,14 +100,20 @@ npx expo start -c    # after adding routes or changing tailwind classes
 
 ## Roadmap
 
-- Implement saved queues: “Play Now (preserve queue)” keeps the current queue for later
-  restoration.
-- Implement playlist management with deduplication on insert
-- Floating lyrics window that can be dragged over the app
-- Left-handed layout preference for one-handed reach
-- Statistics export for pandas and matplotlib
-- Cloud library locations
-- Haptics for granular seek
+- Implement the song long-press actions already shown in the Songs tab: “Add to playlist”, “Enqueue”,
+  “Play Next (preserve queue)” and “Play Now (preserve queue)”. The preserve-queue plan is to save the
+  active queue and current song, play the selected song, then restore the saved queue and song. An
+  alternative is to put queues on hold and restore them from a “Saved Queues” option in the top-right
+  menu. Held queues should be removed after all their songs have played, with manual removal available.
+- Implement playlist management with a clear duplicate policy: deduplicate on insert, or remove an
+  existing copy and reinsert it at the bottom.
+- Show lyrics on the expanded player and allow them to pop out into a draggable floating window.
+- Add a left-handed layout preference that moves action buttons toward the bottom-left for easier
+  one-handed use.
+- Export playback statistics in an analysis-friendly format for Python, NumPy, pandas and Matplotlib.
+- Stream music from a user-selected cloud provider, such as Google Drive.
+- Add haptic feedback when entering granular seek mode and at other appropriate interactions.
+- Evaluate one-time or monthly payment options for selected features.
 
 ## Licence
 
