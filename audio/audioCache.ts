@@ -1,7 +1,7 @@
 import { Directory, File, Paths } from "expo-file-system";
 import { STORAGE_KEYS, storage } from "@/lib/storage";
 
-const CACHE_DIRECTORY = "lemomuse-audio";
+const CACHE_DIRECTORY = "zestmusic-audio";
 /** Total bytes the cache may occupy before eviction starts. */
 const CACHE_BUDGET_BYTES = 2 * 1024 ** 3;
 /** Entries not used for this long are deleted. */

@@ -1,14 +1,14 @@
 {
   "expo": {
-    "name": "lemomuse",
-    "slug": "lemomuse",
+    "name": "Zest Music",
+    "slug": "zest-music",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "st.ivfro.lemomuse"
+      "bundleIdentifier": "io.github.ivfrost.zestmusic"
     },
     "android": {
       "adaptiveIcon": {
@@ -17,7 +17,7 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "package": "st.ivfro.lemomuse"
+      "package": "io.github.ivfrost.zestmusic"
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -39,7 +39,7 @@
       "expo-sqlite",
       "expo-font"
     ],
-    "scheme": "lemomuse",
+    "scheme": "zestmusic",
     "experiments": {
       "typedRoutes": true
     },

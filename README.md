@@ -1,4 +1,4 @@
-# lemomuse
+# Zest Music
 
 A local-first music player for Android. It scans the folders you grant it, keeps the library in
 SQLite, and plays the files through `react-native-audio-api` with background playback and a system
@@ -98,3 +98,7 @@ npx expo start -c    # after adding routes or changing tailwind classes
 - Cloud library locations
 - Haptics for granular seek
 - A multitool FAB consolidating search and common actions
+
+## Licence
+
+Apache-2.0. See [LICENSE](LICENSE).

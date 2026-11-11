@@ -21,7 +21,7 @@ import {
   LIGHT_MATERIAL_COLORS,
 } from '@/hooks/materialPalette';
 
-const DB_NAME = 'lemomuse';
+const DB_NAME = 'zestmusic';
 
 function DrizzleStudioBridge() {
   useDrizzleStudio(useSQLiteContext());
