@@ -135,7 +135,7 @@ export default function SongsTab() {
     : mode === 'recent'
       ? 'Nothing played yet'
       : mode === 'most'
-        ? 'No play history yet'
+        ? 'Nothing played yet'
         : isLibraryLoading
           ? 'Loading songs…'
           : 'No songs found';

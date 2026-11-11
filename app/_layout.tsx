@@ -9,17 +9,14 @@ import {
 } from 'expo-sqlite';
 import { StatusBar } from 'expo-status-bar';
 import { Suspense, useMemo } from 'react';
-import { ActivityIndicator, Text, useColorScheme, View } from 'react-native';
+import { ActivityIndicator, Text, View } from 'react-native';
 import { AudioProvider } from '@/audio/AudioProvider';
 import { PlaybackNotificationSync } from '@/audio/PlaybackNotificationSync';
 import { PlayStatsSync } from '@/audio/PlayStatsSync';
 import migrations from '@/drizzle/migrations';
 import './global.css';
 import { MusicLocationsProvider } from '@/context/MusicLocationContext';
-import {
-  DARK_MATERIAL_COLORS,
-  LIGHT_MATERIAL_COLORS,
-} from '@/hooks/materialPalette';
+import { useMaterialTheme } from '@/hooks/useMaterialTheme';
 
 const DB_NAME = 'zestmusic';
 
@@ -29,9 +26,7 @@ function DrizzleStudioBridge() {
 }
 
 export default function RootLayout() {
-  const scheme = useColorScheme();
-  const themeColors =
-    scheme === 'dark' ? DARK_MATERIAL_COLORS : LIGHT_MATERIAL_COLORS;
+  const { colors: themeColors } = useMaterialTheme();
   const backgroundColor = themeColors.background;
   const db = useMemo(() => drizzle(openDatabaseSync(DB_NAME)), []);
   const { success: dbMigrateSuccess, error: dbMigrateError } = useMigrations(

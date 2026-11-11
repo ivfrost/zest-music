@@ -129,7 +129,7 @@ export default function AlbumsTab() {
     mode === 'recent'
       ? 'Nothing played yet'
       : mode === 'most'
-        ? 'No play history yet'
+        ? 'Nothing played yet'
         : isLibraryLoading
           ? 'Loading albums…'
           : 'No albums found';

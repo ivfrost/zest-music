@@ -1,6 +1,6 @@
 import { router, usePathname } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -9,6 +9,7 @@ import {
   Pressable,
   Text,
   TextInput,
+  type TextInputInstance,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -51,6 +52,7 @@ export function SearchOverlay({ initialScope, onClose }: SearchOverlayProps) {
   const renderSeparator = useRowSeparator(dividerColor, 88);
   const [query, setQuery] = useState('');
   const [scope, setScope] = useState<SearchScope>(initialScope);
+  const searchInputRef = useRef<TextInputInstance>(null);
 
   const normalized = query.trim().toLowerCase();
 
@@ -87,7 +89,12 @@ export function SearchOverlay({ initialScope, onClose }: SearchOverlayProps) {
     : 'Type to search your library';
 
   return (
-    <Modal visible animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible
+      animationType="slide"
+      onRequestClose={onClose}
+      onShow={() => searchInputRef.current?.focus()}
+    >
       <View style={[themeVars, { flex: 1 }]}>
         <SafeAreaView edges={['top', 'bottom']} className="flex-1 bg-background">
           <KeyboardAvoidingView
@@ -106,6 +113,7 @@ export function SearchOverlay({ initialScope, onClose }: SearchOverlayProps) {
                   tintColor={colors.onSurfaceVariant}
                 />
                 <TextInput
+                  ref={searchInputRef}
                   autoFocus
                   value={query}
                   onChangeText={setQuery}

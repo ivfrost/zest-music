@@ -5,9 +5,10 @@ SQLite, and plays the files through `react-native-audio-api` with background pla
 media notification.
 
 I started Zest Music inspired by Vanilla Music. I wanted a more modern, native-feeling Android
-interface and to smooth out a few personal workflow nitpicks: choosing what happens when tapping the
+interface and to smooth out personal workflow nitpicks: choosing what happens when tapping the
 currently playing song, making controls easier to reach one-handed (especially for left-handed use),
-and playing a different song without losing the current queue.
+and playing a different song without losing the current queue, etc. These are only examples; the
+roadmap below is still an unconsolidated working list of ideas.
 
 Audio files and the SQLite database stay on-device; no account is required. When an artist has
 no MusicBrainz ID, artwork lookup sends its name to MusicBrainz to find one, then uses the ID with
@@ -113,7 +114,6 @@ npx expo start -c    # after adding routes or changing tailwind classes
 - Export playback statistics in an analysis-friendly format for Python, NumPy, pandas and Matplotlib.
 - Stream music from a user-selected cloud provider, such as Google Drive.
 - Add haptic feedback when entering granular seek mode and at other appropriate interactions.
-- Evaluate one-time or monthly payment options for selected features.
 
 ## Licence
 

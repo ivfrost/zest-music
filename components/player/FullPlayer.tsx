@@ -493,6 +493,7 @@ export function FullPlayer({
     if (isExpanded) return;
     settleQueueSheet('closed');
     setQueueSheetLevel('closed');
+    setIsQueueDragging(false);
   }, [isExpanded, settleQueueSheet]);
 
   useEffect(() => {
@@ -830,22 +831,19 @@ export function FullPlayer({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={
-              queueSheetLevel === 'closed'
-                ? 'Show upcoming queue'
-                : 'Hide upcoming queue'
+              isQueueOpen ? 'Hide upcoming queue' : 'Show upcoming queue'
             }
             accessibilityHint="Drag this handle up to expand the queue"
-            onPress={() =>
-              setQueueSheetLevel(level =>
-                level === 'closed' ? 'peek' : 'closed',
-              )
-            }
+            onPress={() => {
+              setIsQueueDragging(false);
+              setQueueSheetLevel(isQueueOpen ? 'closed' : 'peek');
+            }}
             className="h-full flex-row items-center justify-center gap-2"
             android_ripple={{ color: rippleColor }}
           >
             <SymbolView
               name={
-                queueSheetLevel === 'closed'
+                !isQueueOpen
                   ? {
                       ios: 'chevron.up',
                       android: 'keyboard_arrow_up',
@@ -882,6 +880,7 @@ export function FullPlayer({
                 onPress={() => {
                   onSelectQueueTrack(track.queueIndex);
                   setQueueSheetLevel('closed');
+                  setIsQueueDragging(false);
                 }}
                 unstable_pressDelay={80}
                 style={({ pressed }) =>

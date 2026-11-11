@@ -1,13 +1,82 @@
+import { Color } from 'expo-router';
 import { vars } from 'nativewind';
 import { useMemo } from 'react';
-import { useColorScheme } from 'react-native';
+import { Platform, useColorScheme } from 'react-native';
 import { withAlpha } from '@/lib/color';
 import { DARK_MATERIAL_COLORS, LIGHT_MATERIAL_COLORS } from './materialPalette';
 
+const resolveDynamicColor = (color: unknown, fallback: string) =>
+  typeof color === 'string' ? color : fallback;
+
 export function useMaterialTheme() {
   const scheme = useColorScheme();
-  const colors =
+  const fallbackColors =
     scheme === 'dark' ? DARK_MATERIAL_COLORS : LIGHT_MATERIAL_COLORS;
+  const colors =
+    Platform.OS === 'android'
+      ? {
+          primary: resolveDynamicColor(
+            Color.android.dynamic.primary,
+            fallbackColors.primary,
+          ),
+          onPrimary: resolveDynamicColor(
+            Color.android.dynamic.onPrimary,
+            fallbackColors.onPrimary,
+          ),
+          primaryContainer: resolveDynamicColor(
+            Color.android.dynamic.primaryContainer,
+            fallbackColors.primaryContainer,
+          ),
+          onPrimaryContainer: resolveDynamicColor(
+            Color.android.dynamic.onPrimaryContainer,
+            fallbackColors.onPrimaryContainer,
+          ),
+          background: resolveDynamicColor(
+            Color.android.dynamic.background,
+            fallbackColors.background,
+          ),
+          onBackground: resolveDynamicColor(
+            Color.android.dynamic.onBackground,
+            fallbackColors.onBackground,
+          ),
+          surface: resolveDynamicColor(
+            Color.android.dynamic.surface,
+            fallbackColors.surface,
+          ),
+          onSurface: resolveDynamicColor(
+            Color.android.dynamic.onSurface,
+            fallbackColors.onSurface,
+          ),
+          surfaceVariant: resolveDynamicColor(
+            Color.android.dynamic.surfaceVariant,
+            fallbackColors.surfaceVariant,
+          ),
+          onSurfaceVariant: resolveDynamicColor(
+            Color.android.dynamic.onSurfaceVariant,
+            fallbackColors.onSurfaceVariant,
+          ),
+          surfaceContainerLow: resolveDynamicColor(
+            Color.android.dynamic.surfaceContainerLow,
+            fallbackColors.surfaceContainerLow,
+          ),
+          surfaceContainer: resolveDynamicColor(
+            Color.android.dynamic.surfaceContainer,
+            fallbackColors.surfaceContainer,
+          ),
+          surfaceContainerHigh: resolveDynamicColor(
+            Color.android.dynamic.surfaceContainerHigh,
+            fallbackColors.surfaceContainerHigh,
+          ),
+          outline: resolveDynamicColor(
+            Color.android.dynamic.outline,
+            fallbackColors.outline,
+          ),
+          outlineVariant: resolveDynamicColor(
+            Color.android.dynamic.outlineVariant,
+            fallbackColors.outlineVariant,
+          ),
+        }
+      : fallbackColors;
 
   const themeVars = useMemo(
     () =>
