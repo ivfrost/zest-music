@@ -5,9 +5,10 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "st.ivfro.lemomuse"
     },
     "android": {
       "adaptiveIcon": {
@@ -15,10 +16,33 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      },
+      "package": "st.ivfro.lemomuse"
     },
     "web": {
-      "favicon": "./assets/favicon.png"
-    }
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      [
+        "react-native-audio-api",
+        {
+          "androidPermissions": [
+            "android.permission.FOREGROUND_SERVICE",
+            "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+            "android.permission.POST_NOTIFICATIONS"
+          ]
+        }
+      ],
+      "expo-sqlite",
+      "expo-font"
+    ],
+    "scheme": "lemomuse",
+    "experiments": {
+      "typedRoutes": true
+    },
+    "backgroundColor": "#FEF7FF"
   }
 }

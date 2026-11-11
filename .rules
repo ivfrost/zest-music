@@ -1,0 +1,6 @@
+# Comments
+
+- Comment only to explain non-obvious intent, constraints, or tradeoffs.
+- Keep comments to one short, factual line.
+- Do not restate code, narrate changes, or add conversational filler.
+- Never delete a comment that explains why something is done.
