@@ -72,16 +72,18 @@ mode and position persist so playback can be restored after a restart.
 
 ## Structure
 
-| Path | Contents |
-| --- | --- |
-| `app/` | Expo Router routes: tabs, artist detail, settings |
-| `components/` | list rows, search overlay, action sheet, mini and full player |
-| `audio/` | engine, provider, queue and session persistence, cache, notification sync |
-| `context/` | library scanning and tab bar state |
-| `db/` | Drizzle schema, select schemas, generated migrations |
-| `hooks/` | theme, preferences, artist images, audio and library accessors |
-| `lib/` | stateless helpers: stats, album filter, artist images, formatting, storage |
-| `types/` | zod schemas and shared types |
+| Path                 | Contents                                                                  |
+| -------------------- | ------------------------------------------------------------------------- |
+| `src/app/`           | Expo Router routes: tabs, artist detail, settings                         |
+| `src/audio/`         | engine, provider, queue and session persistence, cache, notification sync |
+| `src/babel-plugins/` | Hermes compatibility transform for `file-type`                            |
+| `src/components/`    | list rows, search overlay, action sheet, mini and full player             |
+| `src/context/`       | library scanning and tab bar state                                        |
+| `src/db/`            | Drizzle schema and select schemas                                         |
+| `src/hooks/`         | theme, preferences, artist images, audio and library accessors            |
+| `src/lib/`           | helpers: stats, album filter, artist images, formatting, storage          |
+| `src/types/`         | zod schemas and shared types                                              |
+| `drizzle/`           | generated SQLite migrations                                               |
 
 ## Run locally
 

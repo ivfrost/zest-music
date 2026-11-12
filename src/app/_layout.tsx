@@ -13,7 +13,7 @@ import { ActivityIndicator, Text, View } from 'react-native';
 import { AudioProvider } from '@/audio/AudioProvider';
 import { PlaybackNotificationSync } from '@/audio/PlaybackNotificationSync';
 import { PlayStatsSync } from '@/audio/PlayStatsSync';
-import migrations from '@/drizzle/migrations';
+import migrations from '../../drizzle/migrations';
 import './global.css';
 import { MusicLocationsProvider } from '@/context/MusicLocationContext';
 import { useMaterialTheme } from '@/hooks/useMaterialTheme';
@@ -97,7 +97,10 @@ export default function RootLayout() {
               screenOptions={{ contentStyle: { backgroundColor } }}
             >
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              <Stack.Screen name="(settings)" options={{ headerShown: false }} />
+              <Stack.Screen
+                name="(settings)"
+                options={{ headerShown: false }}
+              />
             </Stack>
           </MusicLocationsProvider>
         </SQLiteProvider>

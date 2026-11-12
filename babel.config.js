@@ -13,7 +13,7 @@ module.exports = api => {
       '@babel/plugin-transform-unicode-sets-regex',
       // file-type also contains a Node-only dynamic import() that Hermes
       // cannot parse. The plugin is scoped to that package.
-      './babel-plugins/file-type-hermes',
+      './src/babel-plugins/file-type-hermes',
       'react-native-worklets/plugin',
     ],
   };
