@@ -15,19 +15,28 @@ no MusicBrainz ID, artwork lookup sends its name to MusicBrainz to find one, the
 Wikidata to find an image on Wikimedia Commons. If enabled, Deezer also receives the artist name
 for fallback lookup.
 
+## Screenshots
+
+| ![Songs](assets/screenshots/songs.png) | ![Artist](assets/screenshots/artist.png) | ![Now playing](assets/screenshots/player.png) |
+| :---: | :---: | :---: |
+| **Songs** — mode and album filters, play all | **Artist** — hero, albums, counts | **Now playing** — queue and seek |
+
 ## What works today
 
 - Grant music folders through Android's SAF picker, then scan tags into SQLite
 - Scanner recognizes AAC, AIFF, APE, ASF, CAF, DSD (DFF/DSF), FLAC, M4A/M4B, MP1/2/3, MP4,
   Musepack (MPC/MPP), Ogg-family (OGA/OGG/Opus/Speex), WAV, WMA and WavPack. Playback depends on
   Android native decoder support.
-- Artists, Albums and Songs tabs, with Recent / Most played modes driven by persisted play counts
+- Artists, Albums and Songs tabs with an All / Recent / Most played dropdown driven by persisted
+  play counts
 - Tapping an album anywhere filters the Songs tab behind a dismissible chip
 - Artist page with an edge-to-edge hero image, album carousel and library counts
-- Search overlay opened from a FAB, scoped to the entity of the current tab
+- Search overlay opened from the mini player, with an Artists / Songs / Albums switch that starts on
+  the current tab
 - Full player: cover, play/pause, previous/next, shuffle, repeat one/all, seek bar with long-press
   fine scrubbing, and an up-next sheet
-- Mini player that expands on drag; the search FAB sits above it
+- Mini player with search, play/pause and expand: an upward swipe grows it into the full player,
+  which closes only on a downward swipe
 - Background playback with a media notification (play/pause, next/previous, scrubber)
 - Settings: what tapping the current song does, artist image source, music folders
 - Material 3 palette in light and dark, following the system setting
@@ -39,21 +48,24 @@ for fallback lookup.
 - NativeWind 4 for styling, `react-native-reanimated` 4 for gestures and transitions
 - `expo-sqlite` with Drizzle ORM; migrations applied at boot
 - `react-native-audio-api` for playback, a JSI module, so the app needs a dev build
-- `music-metadata` and `strtok3` for tags, `zod` for persisted shapes
+- `music-metadata` and `strtok3` for tags, `expo-image` for artwork, `zod` for persisted shapes
 - Application id `io.github.ivfrost.zestmusic`
 
 ## Playback
 
 Selecting a song passes its URI from the screen to `AudioProvider` and the singleton `audioEngine`.
-For Android SAF `content://` URIs, the engine first copies the file into its app cache because the
-native file source needs a local path. `StreamingAudio` then mounts the `Audio` component from
-`react-native-audio-api` with that path and the shared `AudioContext`.
+An Android SAF `content://` URI is opened as a file descriptor by the `saf-file-descriptor` module
+and played from `/proc/self/fd/<fd>`. The engine probes that descriptor before use; providers that
+withhold descriptor access fall back to copying the file into the app cache once, so playback never
+fails on them. `StreamingAudio` then mounts the `Audio` component from `react-native-audio-api` with
+the resulting source and the shared `AudioContext`.
 
 The signal path is:
 
 ```
-SAF URI -> cached file -> native file source -> MediaElementSource
-         -> BiquadFilterNode (gain 0 dB) -> AudioContext.destination -> device output
+SAF URI -> /proc/self/fd/<fd> (or a cached copy when the descriptor is unplayable)
+        -> native file source -> MediaElementSource
+        -> BiquadFilterNode (gain 0 dB) -> AudioContext.destination -> device output
 ```
 
 The native module decodes and plays the file. The filter is currently neutral, so it does not
@@ -67,23 +79,27 @@ mode and position persist so playback can be restored after a restart.
 - Metadata editing is intentionally out of scope; use MusicBrainz Picard to edit tags before
   scanning. Zest Music reads embedded MusicBrainz IDs, falls back to tag names, and does not modify
   files. Missing values use `Unknown Artist` / `Unknown Album`.
+- Inserts go through `src/db/library.ts`, which upserts artists and releases by MusicBrainz ID.
 - Play statistics are written once per actual playback and read through a small module store, so the
   UI never waits on the database for ranking.
 
 ## Structure
 
-| Path                 | Contents                                                                  |
-| -------------------- | ------------------------------------------------------------------------- |
-| `src/app/`           | Expo Router routes: tabs, artist detail, settings                         |
-| `src/audio/`         | engine, provider, queue and session persistence, cache, notification sync |
-| `src/babel-plugins/` | Hermes compatibility transform for `file-type`                            |
-| `src/components/`    | list rows, search overlay, action sheet, mini and full player             |
-| `src/context/`       | library scanning and tab bar state                                        |
-| `src/db/`            | Drizzle schema and select schemas                                         |
-| `src/hooks/`         | theme, preferences, artist images, audio and library accessors            |
-| `src/lib/`           | helpers: stats, album filter, artist images, formatting, storage          |
-| `src/types/`         | zod schemas and shared types                                              |
-| `drizzle/`           | generated SQLite migrations                                               |
+| Path                 | Contents                                                                 |
+| -------------------- | ------------------------------------------------------------------------ |
+| `modules/`           | `saf-file-descriptor`: Kotlin + TS module that opens SAF URIs as fds     |
+| `patches/`           | `react-native-audio-api` patch so descriptor paths decode                |
+| `src/app/`           | Expo Router routes: tabs, artist stack, settings                         |
+| `src/audio/`         | engine with descriptor and cache sources, provider, queue, notifications |
+| `src/babel-plugins/` | Hermes compatibility transform for `file-type`                           |
+| `src/components/`    | list rows, players, filter dropdown, tab menu, search, action sheet      |
+| `src/context/`       | library scan state and tab bar state                                     |
+| `src/db/`            | Drizzle schema, select schemas and library upserts                       |
+| `src/hooks/`         | theme, preferences, artist images, audio and library accessors           |
+| `src/lib/`           | scan/index helpers, saved locations, stats, artist images, layout        |
+| `src/theme/`         | MD3 tokens for spacing, type and radius, mapped into tailwind            |
+| `src/types/`         | zod schemas and shared types                                             |
+| `drizzle/`           | generated SQLite migrations                                              |
 
 ## Run locally
 
@@ -115,6 +131,7 @@ npx expo start -c    # after adding routes or changing tailwind classes
   one-handed use.
 - Export playback statistics in an analysis-friendly format for Python, NumPy, pandas and Matplotlib.
 - Stream music from a user-selected cloud provider, such as Google Drive.
+- Resume an interrupted scan instead of restarting the folder from the beginning.
 - Add haptic feedback when entering granular seek mode and at other appropriate interactions.
 
 ## Licence
