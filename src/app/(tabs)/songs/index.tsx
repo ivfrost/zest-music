@@ -9,18 +9,23 @@ import {
   Text,
   View,
 } from 'react-native';
+
 import {
   createQueueFromSongList,
   getSongDisplayInfo,
 } from '@/audio/trackHelpers';
 import { ActionSheet } from '@/components/ActionSheet';
+import { FilterDropdown } from '@/components/FilterDropdown';
 import { useRowSeparator } from '@/components/RowSeparator';
 import { SongRow } from '@/components/SongRow';
+import { TabMenuButton } from '@/components/TabMenuButton';
 import { TabScreen } from '@/components/TabScreen';
 import { useAudio } from '@/hooks/useAudio';
 import { useMaterialTheme } from '@/hooks/useMaterialTheme';
 import useMusicLocations from '@/hooks/useMusicLocation';
 import { setAlbumFilter, useAlbumFilter } from '@/lib/albumFilter';
+import { spacing } from '@/theme';
+
 import { usePlayStats } from '@/lib/playStats';
 import type { Song } from '@/types/songs';
 
@@ -31,10 +36,12 @@ const MODES = ['all', 'recent', 'most'] as const;
 type Mode = (typeof MODES)[number];
 
 const MODE_LABELS: Record<Mode, string> = {
-  all: 'All songs',
+  all: 'All',
   recent: 'Recent',
   most: 'Most played',
 };
+
+const MODE_OPTIONS = MODES.map(option => MODE_LABELS[option]);
 
 const SONG_ACTIONS = [
   'Add to playlist',
@@ -48,7 +55,7 @@ export default function SongsTab() {
     songs,
     releaseById,
     artistNameById,
-    isLoading: isLibraryLoading,
+    isScanning: isLibraryLoading,
   } = useMusicLocations();
   const { playTrack, currentUri, isPlaying, isLoading } = useAudio();
   const currentRoute = usePathname();
@@ -59,9 +66,7 @@ export default function SongsTab() {
   // Session plays layered over the persisted counters.
   const played = usePlayStats();
   const albumId = useAlbumFilter();
-  const albumTitle = albumId
-    ? (releaseById.get(albumId)?.title ?? null)
-    : null;
+  const albumTitle = albumId ? (releaseById.get(albumId)?.title ?? null) : null;
   const albumArtist = useMemo(() => {
     if (!albumId) return null;
     const song = songs.find(candidate => candidate.releaseId === albumId);
@@ -106,7 +111,7 @@ export default function SongsTab() {
     const offset = pendingOffsetRef.current;
     pendingOffsetRef.current = null;
     listRef.current?.scrollToOffset({ offset, animated: false });
-  }
+  };
 
   const actionSheetInfo = useMemo(() => {
     if (!actionSong) return null;
@@ -117,7 +122,9 @@ export default function SongsTab() {
 
     return {
       title,
-      message: [artist || 'Unknown Artist', albumTitle].filter(Boolean).join(' · '),
+      message: [artist || 'Unknown Artist', albumTitle]
+        .filter(Boolean)
+        .join(' · '),
     };
   }, [actionSong, artistNameById, releaseById]);
 
@@ -127,9 +134,12 @@ export default function SongsTab() {
     return () => cancelAnimationFrame(frame);
   }, [listKey]);
 
-  const visibleSongs = albumId
-    ? songs.filter(song => song.releaseId === albumId)
-    : lists[mode];
+  const visibleSongs = useMemo(
+    () =>
+      albumId ? songs.filter(song => song.releaseId === albumId) : lists[mode],
+    [albumId, songs, lists, mode],
+  );
+
   const emptyMessage = albumId
     ? 'No songs in this album'
     : mode === 'recent'
@@ -140,78 +150,81 @@ export default function SongsTab() {
           ? 'Loading songs…'
           : 'No songs found';
 
+  const playAll = () => {
+    const firstSong = visibleSongs[0];
+    if (!firstSong) return;
+    void playTrack(firstSong.uri, {
+      currentRoute,
+      queue: createQueueFromSongList(visibleSongs, firstSong.uri),
+    });
+  };
+
+  const playAllShuffled = () => {
+    const firstSong = visibleSongs[0];
+    if (!firstSong) return;
+    void playTrack(
+      firstSong.uri,
+      {
+        currentRoute,
+        queue: createQueueFromSongList(visibleSongs, firstSong.uri),
+      },
+      { shuffle: true },
+    );
+  };
+
+  const albumChip = albumId ? (
+    <View className="max-w-[58%] flex-row items-center gap-1 overflow-hidden rounded-md3-full bg-primary-container py-1 pl-3 pr-1">
+      <Text
+        numberOfLines={1}
+        className="shrink text-label-large font-medium text-on-primary-container"
+      >
+        {[albumTitle ?? 'Album', albumArtist].filter(Boolean).join(' · ')}
+      </Text>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Clear album filter"
+        onPress={() => setAlbumFilter(null)}
+        android_ripple={{ color: rippleColor, borderless: true }}
+        hitSlop={8}
+        className="rounded-md3-full p-1"
+      >
+        <SymbolView
+          name={{ ios: 'xmark.circle.fill', android: 'close', web: 'close' }}
+          size={16}
+          tintColor={colors.onPrimaryContainer}
+        />
+      </Pressable>
+    </View>
+  ) : null;
+
   return (
     <TabScreen>
       <View className="flex-1">
-        <View className="overflow-hidden rounded-3xl bg-surface-container">
-          {albumId ? (
-            <View className="flex-row p-2">
-              <View className="flex-1 flex-row items-center gap-2 rounded-full bg-primary-container py-1.5 pl-4 pr-2">
-                <Text
-                  numberOfLines={1}
-                  className="flex-1 text-sm font-medium text-on-primary-container"
-                >
-                  {[albumTitle ?? 'Album', albumArtist]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </Text>
-                <View className="overflow-hidden rounded-full">
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Clear album filter"
-                    onPress={() => setAlbumFilter(null)}
-                    android_ripple={{ color: rippleColor, borderless: true }}
-                    hitSlop={8}
-                    className="p-1"
-                  >
-                    <SymbolView
-                      name={{
-                        ios: 'xmark.circle.fill',
-                        android: 'close',
-                        web: 'close',
-                      }}
-                      size={18}
-                      tintColor={colors.onPrimaryContainer}
-                    />
-                  </Pressable>
-                </View>
-              </View>
-            </View>
-          ) : (
-            <View className="flex-row gap-1 p-2">
-              {MODES.map(option => {
-                const selected = mode === option;
-                return (
-                  <View
-                    key={option}
-                    className="flex-1 overflow-hidden rounded-full"
-                  >
-                    <Pressable
-                      accessibilityRole="tab"
-                      accessibilityState={{ selected }}
-                      onPress={() => setMode(option)}
-                      android_ripple={{ color: rippleColor, borderless: true }}
-                      className={`items-center py-2 ${selected ? 'bg-primary-container' : ''}`}
-                    >
-                      <Text
-                        numberOfLines={1}
-                        className={`text-sm font-medium ${
-                          selected
-                            ? 'text-on-primary-container'
-                            : 'text-on-surface-variant'
-                        }`}
-                      >
-                        {MODE_LABELS[option]}
-                      </Text>
-                    </Pressable>
-                  </View>
-                );
-              })}
-            </View>
+        <View className="h-12 flex-row items-center gap-2">
+          <Text
+            accessibilityRole="header"
+            numberOfLines={1}
+            className="text-title-large font-medium text-on-surface"
+          >
+            Songs
+          </Text>
+          <View className="flex-1" />
+          {albumChip ?? (
+            <FilterDropdown
+              label={MODE_LABELS[mode]}
+              options={MODE_OPTIONS}
+              selectedIndex={MODES.indexOf(mode)}
+              onSelect={index => {
+                const next = MODES[index];
+                if (next) setMode(next);
+              }}
+              accessibilityLabel="Filter songs"
+            />
           )}
+          <TabMenuButton />
         </View>
 
-        <View className="mt-3 max-h-full shrink overflow-hidden rounded-3xl bg-surface-container-low">
+        <View className="mt-3 max-h-full shrink overflow-hidden rounded-md3-xl bg-surface-container-low">
           <FlatList
             ref={listRef}
             data={visibleSongs}
@@ -220,20 +233,67 @@ export default function SongsTab() {
             scrollEventThrottle={16}
             onContentSizeChange={restoreOffset}
             extraData={`${currentUri}|${isPlaying}|${isLoading}|${mode}|${albumId ?? ''}`}
-            className="grow-0"
-            contentContainerClassName="py-2"
+            className="shrink"
+            contentContainerStyle={{ paddingBottom: spacing.sm }}
             ItemSeparatorComponent={renderSeparator}
+            ListHeaderComponent={
+              visibleSongs.length > 0 ? (
+                <View className="flex-row items-center py-1 pl-4 pr-2">
+                  <Text className="flex-1 text-body-medium text-on-surface-variant">
+                    {visibleSongs.length} songs
+                  </Text>
+                  <View className="overflow-hidden rounded-md3-full">
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Shuffle all, ${visibleSongs.length} songs`}
+                      onPress={playAllShuffled}
+                      android_ripple={{ color: rippleColor, borderless: true }}
+                      className="h-12 w-12 items-center justify-center"
+                    >
+                      <SymbolView
+                        name={{
+                          ios: 'shuffle',
+                          android: 'shuffle',
+                          web: 'shuffle',
+                        }}
+                        size={20}
+                        tintColor={colors.onSurfaceVariant}
+                      />
+                    </Pressable>
+                  </View>
+                  <View className="overflow-hidden rounded-md3-full">
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Play all, ${visibleSongs.length} songs`}
+                      onPress={playAll}
+                      android_ripple={{ color: rippleColor, borderless: true }}
+                      className="h-12 w-12 items-center justify-center"
+                    >
+                      <SymbolView
+                        name={{
+                          ios: 'play.fill',
+                          android: 'play_arrow',
+                          web: 'play_arrow',
+                        }}
+                        size={24}
+                        tintColor={colors.onSurfaceVariant}
+                      />
+                    </Pressable>
+                  </View>
+                </View>
+              ) : undefined
+            }
             ListEmptyComponent={
-              <Text className="p-6 text-on-surface-variant">{emptyMessage}</Text>
+              <Text className="p-6 text-on-surface-variant">
+                {emptyMessage}
+              </Text>
             }
             renderItem={({ item: song }) => {
               const release = releaseById.get(song.releaseId);
               const { title: songTitle, artist: artistNames } =
                 getSongDisplayInfo(song, artistNameById);
               const albumTitle =
-                release && release.title !== song.title
-                  ? release.title
-                  : null;
+                release && release.title !== song.title ? release.title : null;
               const subtitle = [albumTitle, artistNames || 'Unknown Artist']
                 .filter(Boolean)
                 .join(' · ');

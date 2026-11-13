@@ -3,6 +3,7 @@ import {
   AudioManager,
   PlaybackNotificationManager,
 } from 'react-native-audio-api';
+import { audioEngine } from '@/audio/audioEngine';
 import { getSongDisplayInfo } from '@/audio/trackHelpers';
 import { useAudio } from '@/hooks/useAudio';
 import useMusicLocations from '@/hooks/useMusicLocation';
@@ -20,7 +21,9 @@ const CONTROLS = [
 
 function enablePlaybackControls() {
   for (const control of CONTROLS) {
-    void PlaybackNotificationManager.enableControl(control, true).catch(() => {});
+    void PlaybackNotificationManager.enableControl(control, true).catch(
+      () => {},
+    );
   }
 }
 
@@ -31,14 +34,14 @@ export function PlaybackNotificationSync() {
   const {
     currentUri,
     isPlaying,
-    positionSeconds,
     durationSeconds,
     seekTo,
     playNext,
     playPrevious,
     togglePlayback,
   } = useAudio();
-  const { songs, artistNameById, releaseById } = useMusicLocations();
+  const { songs, artistNameById, releaseById, removedNowPlaying } =
+    useMusicLocations();
 
   const currentSong = useMemo(
     () =>
@@ -53,8 +56,6 @@ export function PlaybackNotificationSync() {
     : null;
 
   // Long-lived native listeners read the latest state through refs.
-  const positionRef = useRef(positionSeconds);
-  positionRef.current = positionSeconds;
   const isPlayingRef = useRef(isPlaying);
   isPlayingRef.current = isPlaying;
   const togglePlaybackRef = useRef(togglePlayback);
@@ -122,11 +123,10 @@ export function PlaybackNotificationSync() {
     const seek = PlaybackNotificationManager.addEventListener(
       'playbackNotificationSeekTo',
       event => {
+        // PlaybackNotification.onSeekTo updates MediaSession position natively.
+        // Re-posting the notification here made the slider flicker and wait on
+        // the JS bridge before it settled.
         seekToRef.current(event.value);
-        // Push the new position back so the session/slider doesn't snap back.
-        void PlaybackNotificationManager.show({
-          elapsedTime: event.value,
-        }).catch(() => {});
       },
     );
 
@@ -149,12 +149,13 @@ export function PlaybackNotificationSync() {
     }
 
     void PlaybackNotificationManager.show({
-      title: display?.title ?? 'Unknown track',
-      artist: display?.artist ?? 'Unknown Artist',
-      album: release?.title,
-      artwork: release?.artworkUri ?? undefined,
+      title: removedNowPlaying?.title ?? display?.title ?? 'Unknown track',
+      artist: removedNowPlaying?.artist ?? display?.artist ?? 'Unknown Artist',
+      album: removedNowPlaying?.album ?? release?.title,
+      artwork:
+        removedNowPlaying?.artworkUri ?? release?.artworkUri ?? undefined,
       duration: durationSeconds,
-      elapsedTime: positionSeconds,
+      elapsedTime: audioEngine.getCurrentTime(),
       state: isPlaying ? 'playing' : 'paused',
     })
       .then(() => {
@@ -170,8 +171,8 @@ export function PlaybackNotificationSync() {
           error,
         );
       });
-    // positionSeconds seeds the first frame only; ticking it would call show()
-    // every second, so it is intentionally omitted from the dependencies.
+    // position only seeds the first frame; reading it live keeps ticking from
+    // calling show() every second.
   }, [
     currentUri,
     isPlaying,
@@ -180,6 +181,10 @@ export function PlaybackNotificationSync() {
     display?.artist,
     release?.title,
     release?.artworkUri,
+    removedNowPlaying?.title,
+    removedNowPlaying?.artist,
+    removedNowPlaying?.album,
+    removedNowPlaying?.artworkUri,
   ]);
 
   useEffect(() => {
@@ -187,7 +192,7 @@ export function PlaybackNotificationSync() {
 
     const interval = setInterval(() => {
       void PlaybackNotificationManager.show({
-        elapsedTime: positionRef.current,
+        elapsedTime: audioEngine.getCurrentTime(),
       }).catch(() => {});
     }, PROGRESS_UPDATE_MS);
 

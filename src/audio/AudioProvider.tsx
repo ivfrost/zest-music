@@ -28,6 +28,9 @@ import {
 } from './playbackSession';
 
 const POSITION_SAVE_INTERVAL_MS = 5_000;
+/** Tracks warmed in each direction; forward matters more, back covers a rewind. */
+const PREFETCH_AHEAD = 3;
+const PREFETCH_BEHIND = 1;
 
 export interface PlaybackContext {
   currentRoute: string;
@@ -46,10 +49,13 @@ interface AudioReactContextValue {
   currentUri: string | null;
   isPlaying: boolean;
   isLoading: boolean;
-  positionSeconds: number;
   durationSeconds: number;
   seekTo: (seconds: number) => void;
-  playTrack: (uri: string, context: PlaybackContext) => Promise<void>;
+  playTrack: (
+    uri: string,
+    context: PlaybackContext,
+    options?: { shuffle?: boolean },
+  ) => Promise<void>;
   playPrevious: () => Promise<void>;
   playNext: () => Promise<void>;
   queueUris: readonly string[];
@@ -61,11 +67,21 @@ interface AudioReactContextValue {
   toggleLoop: () => void;
   togglePlayback: () => Promise<void>;
   pause: () => void;
+  stopAndClearQueue: () => void;
+}
+
+/** Playback position, split out so its cadence does not re-render every consumer. */
+export interface AudioProgress {
+  positionSeconds: number;
 }
 
 export const AudioReactContext = createContext<AudioReactContextValue | null>(
   null,
 );
+
+export const AudioProgressContext = createContext<AudioProgress | null>(null);
+
+const EMPTY_URIS: readonly string[] = [];
 
 function shuffledCopy(items: readonly string[]): string[] {
   const shuffled = [...items];
@@ -80,17 +96,12 @@ function shuffledCopy(items: readonly string[]): string[] {
 }
 
 /** Native Audio element output, routed through the engine's equalizer. */
-function StreamingAudio({
-  onEnded,
-  onEndedRespawned,
-}: {
-  onEnded: () => void;
-  onEndedRespawned: () => void;
-}) {
-  const sourceUri = useSyncExternalStore(
+function StreamingAudio({ onEnded }: { onEnded: () => void }) {
+  const sourceInfo = useSyncExternalStore(
     audioEngine.subscribe,
     audioEngine.getSource,
   );
+  const sourceUri = sourceInfo?.uri ?? null;
   const handleRef = useRef<AudioTagHandle>(null);
 
   const source = useMemo(
@@ -100,6 +111,12 @@ function StreamingAudio({
 
   useEffect(() => {
     if (!sourceUri) return;
+
+    const knownDuration = audioEngine.getKnownDuration(sourceUri);
+    if (knownDuration != null && knownDuration > 0) {
+      audioEngine.handleDurationChange(sourceUri, knownDuration);
+      return;
+    }
 
     let cancelled = false;
     void getAudioDuration(sourceUri)
@@ -119,15 +136,14 @@ function StreamingAudio({
   }, [sourceUri]);
 
   const handleLoaded = useCallback(() => {
-    if (audioEngine.handleLoaded(handleRef.current)) {
-      onEndedRespawned();
-    }
-  }, [onEndedRespawned]);
+    audioEngine.handleLoaded(handleRef.current);
+  }, []);
 
   if (!source) return null;
 
   return (
     <Audio
+      key={sourceInfo?.generation ?? 0}
       ref={handleRef}
       source={source}
       context={audioEngine.audioContext}
@@ -149,12 +165,15 @@ export function AudioProvider({ children }: PropsWithChildren) {
     audioEngine.subscribe,
     audioEngine.getSnapshot,
   );
+  const { currentUri, isPlaying, isLoading, duration, currentTime } = playback;
   const playbackQueue = useRef<PlaybackQueueState | null>(null);
-  const pendingNextUri = useRef<string | null>(null);
+  const [queueVersion, setQueueVersion] = useState(0);
   const [isShuffling, setIsShuffling] = useState(false);
   const [repeatMode, setRepeatMode] = useState<RepeatMode>('off');
   const [isRestoring, setIsRestoring] = useState(true);
   const restoreAborted = useRef(false);
+  /** Invalidates an in-flight prefetch window when the queue moves on. */
+  const prefetchGeneration = useRef(0);
   const lastSavedPosition = useRef({
     uri: null as string | null,
     seconds: 0,
@@ -180,6 +199,7 @@ export function AudioProvider({ children }: PropsWithChildren) {
     (next: PlaybackQueueState | null) => {
       restoreAborted.current = true;
       playbackQueue.current = next;
+      setQueueVersion(version => version + 1);
       setIsShuffling(next?.isShuffling ?? false);
       setRepeatMode(next?.repeatMode ?? 'off');
       persistSession(next);
@@ -223,6 +243,7 @@ export function AudioProvider({ children }: PropsWithChildren) {
           isShuffling,
           hasRepeatedCurrentTrack: false,
         };
+        setQueueVersion(version => version + 1);
         setIsShuffling(isShuffling);
         setRepeatMode(session.repeatMode);
 
@@ -247,6 +268,118 @@ export function AudioProvider({ children }: PropsWithChildren) {
     };
   }, []);
 
+  /**
+   * Warms the cache for the tracks a skip is most likely to reach. One track was
+   * not enough: skipping twice outran the prefetch and every second skip paid the
+   * full SAF copy.
+   */
+  const prefetchUpcoming = useCallback(() => {
+    const activeQueue = playbackQueue.current;
+    if (!activeQueue || activeQueue.order.length === 0) return;
+
+    const total = activeQueue.order.length;
+    const currentUri = audioEngine.getSnapshot().currentUri;
+    const generation = ++prefetchGeneration.current;
+    const uris: string[] = [];
+
+    const collect = (direction: 1 | -1, count: number) => {
+      for (let step = 1; step <= count; step += 1) {
+        const raw = activeQueue.currentIndex + direction * step;
+        if ((raw < 0 || raw >= total) && activeQueue.repeatMode !== 'all') {
+          break;
+        }
+
+        const index = ((raw % total) + total) % total;
+        const uri = activeQueue.order[index];
+        if (!uri || uri === currentUri || uris.includes(uri)) continue;
+        uris.push(uri);
+      }
+    };
+
+    collect(1, PREFETCH_AHEAD);
+    collect(-1, PREFETCH_BEHIND);
+
+    void (async () => {
+      for (const uri of uris) {
+        if (prefetchGeneration.current !== generation) return;
+        await audioEngine.prefetch(uri);
+      }
+    })();
+  }, []);
+
+  /**
+   * Loads the next playable queue entry, silently skipping entries whose source
+   * file vanished (for example after its folder was removed from the library).
+   */
+  const playFromIndex = useCallback(
+    async (start: number, attempts: number): Promise<boolean> => {
+      const activeQueue = playbackQueue.current;
+      if (!activeQueue || activeQueue.order.length === 0) return false;
+
+      const total = activeQueue.order.length;
+      for (let offset = 0; offset < attempts; offset += 1) {
+        const index = (start + offset) % total;
+        const uri = activeQueue.order[index];
+        if (!uri) continue;
+
+        try {
+          await audioEngine.load(uri, { announce: false });
+        } catch (error) {
+          if (__DEV__)
+            console.warn('[Audio] Skipping unavailable track', { uri, error });
+          continue;
+        }
+
+        if (index !== activeQueue.currentIndex) {
+          commitQueue({ ...activeQueue, currentIndex: index });
+        }
+        prefetchUpcoming();
+        return true;
+      }
+      return false;
+    },
+    [commitQueue, prefetchUpcoming],
+  );
+
+  /**
+   * Plays what follows an ended track, skipping ahead if it is gone. A repeat of
+   * the same track rebuilds only the native source node, not the resolved path.
+   */
+  const advanceAfterEnd = useCallback(
+    async (nextUri: string, queueAfterCommit: PlaybackQueueState) => {
+      if (nextUri === audioEngine.getSnapshot().currentUri) {
+        if (audioEngine.replay()) {
+          prefetchUpcoming();
+          return;
+        }
+      }
+
+      try {
+        await audioEngine.load(nextUri);
+        prefetchUpcoming();
+        return;
+      } catch (error) {
+        // The track's folder may have been removed while it was queued.
+        if (__DEV__)
+          console.warn('[Audio] Queued track is gone, skipping ahead', {
+            uri: nextUri,
+            error,
+          });
+      }
+
+      const wrap = queueAfterCommit.repeatMode === 'all';
+      const remaining = wrap
+        ? queueAfterCommit.order.length - 1
+        : queueAfterCommit.order.length - queueAfterCommit.currentIndex - 1;
+      const played = await playFromIndex(
+        queueAfterCommit.currentIndex + 1,
+        remaining,
+      );
+      if (!played) commitQueue(null);
+    },
+    [commitQueue, playFromIndex, prefetchUpcoming],
+  );
+
   const handleTrackEnded = useCallback(() => {
     if (!audioEngine.handleEnded()) return;
 
@@ -261,11 +394,12 @@ export function AudioProvider({ children }: PropsWithChildren) {
         activeQueue.order[activeQueue.currentIndex] ??
         audioEngine.getSnapshot().currentUri;
       if (currentUri) {
-        commitQueue({
+        const queueAfterCommit = {
           ...activeQueue,
           hasRepeatedCurrentTrack: true,
-        });
-        pendingNextUri.current = currentUri;
+        };
+        commitQueue(queueAfterCommit);
+        void advanceAfterEnd(currentUri, queueAfterCommit);
         return;
       }
     }
@@ -285,29 +419,15 @@ export function AudioProvider({ children }: PropsWithChildren) {
       return;
     }
 
-    commitQueue({
+    const queueAfterCommit = {
       ...activeQueue,
       currentIndex: resolvedNextIndex,
       repeatMode,
       hasRepeatedCurrentTrack: false,
-    });
-    pendingNextUri.current = nextUri;
-  }, [commitQueue]);
-
-  const handleEndedRespawned = useCallback(() => {
-    const nextUri = pendingNextUri.current;
-    if (!nextUri) return;
-
-    pendingNextUri.current = null;
-    const currentRoute = playbackQueue.current?.currentRoute;
-    void audioEngine.load(nextUri).catch(error => {
-      console.error('[Audio] Could not play next queued track', {
-        currentRoute,
-        uri: nextUri,
-        error,
-      });
-    });
-  }, []);
+    };
+    commitQueue(queueAfterCommit);
+    void advanceAfterEnd(nextUri, queueAfterCommit);
+  }, [advanceAfterEnd, commitQueue]);
 
   useEffect(() => {
     // Defer the synchronous directory scan until after the first render.
@@ -360,74 +480,94 @@ export function AudioProvider({ children }: PropsWithChildren) {
     return () => subscription.remove();
   }, [persistSession, isRestoring]);
 
-  async function playTrack(uri: string, context: PlaybackContext) {
-    pendingNextUri.current = null;
-    const requestedQueue = context.queue.includes(uri) ? context.queue : [uri];
-    const currentIndex = requestedQueue.indexOf(uri);
-    const queue = requestedQueue.slice(currentIndex);
-    commitQueue({
-      currentRoute: context.currentRoute,
-      queue,
-      repeatMode: 'off',
-      hasRepeatedCurrentTrack: false,
-      order: [...queue],
-      currentIndex: 0,
-      isShuffling: false,
-    });
+  const playTrack = useCallback(
+    async (
+      uri: string,
+      context: PlaybackContext,
+      options?: { shuffle?: boolean },
+    ) => {
+      const requestedQueue = context.queue.includes(uri)
+        ? context.queue
+        : [uri];
+      const currentIndex = requestedQueue.indexOf(uri);
+      const queue = requestedQueue.slice(currentIndex);
+      const order = options?.shuffle ? shuffledCopy(queue) : [...queue];
+      const firstUri = order[0] ?? uri;
+      commitQueue({
+        currentRoute: context.currentRoute,
+        queue,
+        repeatMode: 'off',
+        hasRepeatedCurrentTrack: false,
+        order,
+        currentIndex: 0,
+        isShuffling: options?.shuffle === true,
+      });
 
-    try {
-      if (playback.currentUri === uri) {
-        if (!playback.isPlaying) {
-          await audioEngine.play();
+      try {
+        if (currentUri === firstUri) {
+          if (!isPlaying) {
+            await audioEngine.play();
+            return;
+          }
+
+          switch (preferences.currentPlayingTapBehavior) {
+            case 'pause':
+              audioEngine.pause();
+              break;
+            case 'start-over':
+              await audioEngine.startOver();
+              break;
+            case 'none':
+              break;
+          }
           return;
         }
 
-        switch (preferences.currentPlayingTapBehavior) {
-          case 'pause':
-            audioEngine.pause();
-            break;
-          case 'start-over':
-            await audioEngine.startOver();
-            break;
-          case 'none':
-            break;
-        }
-        return;
+        audioEngine.stop();
+        await audioEngine.load(firstUri);
+        prefetchUpcoming();
+      } catch (error) {
+        console.error('[Audio] Failed to play track', { uri, error });
       }
+    },
+    [
+      commitQueue,
+      currentUri,
+      isPlaying,
+      preferences.currentPlayingTapBehavior,
+      prefetchUpcoming,
+    ],
+  );
 
-      audioEngine.stop();
-      await audioEngine.load(uri);
-    } catch (error) {
-      console.error('[Audio] Failed to play track', { uri, error });
-    }
-  }
+  const playQueueTrackAt = useCallback(
+    async (index: number) => {
+      const activeQueue = playbackQueue.current;
+      const uri = activeQueue?.order[index];
+      if (!activeQueue || !uri) return;
 
-  async function playQueueTrackAt(index: number) {
-    pendingNextUri.current = null;
-    const activeQueue = playbackQueue.current;
-    const uri = activeQueue?.order[index];
-    if (!activeQueue || !uri) return;
-
-    const repeatMode =
-      activeQueue.repeatMode === 'one' ? 'off' : activeQueue.repeatMode;
-    commitQueue({
-      ...activeQueue,
-      currentIndex: index,
-      repeatMode,
-      hasRepeatedCurrentTrack: false,
-    });
-    try {
-      await audioEngine.load(uri);
-    } catch (error) {
-      console.error('[Audio] Could not play queued track', {
-        currentRoute: activeQueue.currentRoute,
-        uri,
-        error,
+      const repeatMode =
+        activeQueue.repeatMode === 'one' ? 'off' : activeQueue.repeatMode;
+      commitQueue({
+        ...activeQueue,
+        currentIndex: index,
+        repeatMode,
+        hasRepeatedCurrentTrack: false,
       });
-    }
-  }
+      try {
+        await audioEngine.load(uri);
+        prefetchUpcoming();
+      } catch (error) {
+        console.error('[Audio] Could not play queued track', {
+          currentRoute: activeQueue.currentRoute,
+          uri,
+          error,
+        });
+      }
+    },
+    [commitQueue, prefetchUpcoming],
+  );
 
-  async function playPrevious() {
+  const playPrevious = useCallback(async () => {
     if (audioEngine.getCurrentTime() >= 3) {
       await audioEngine.startOver();
       return;
@@ -440,9 +580,9 @@ export function AudioProvider({ children }: PropsWithChildren) {
     }
 
     await playQueueTrackAt(activeQueue.currentIndex - 1);
-  }
+  }, [playQueueTrackAt]);
 
-  async function playNext() {
+  const playNext = useCallback(async () => {
     const activeQueue = playbackQueue.current;
     if (!activeQueue) return;
 
@@ -452,9 +592,9 @@ export function AudioProvider({ children }: PropsWithChildren) {
     } else if (activeQueue.repeatMode === 'all') {
       await playQueueTrackAt(0);
     }
-  }
+  }, [playQueueTrackAt]);
 
-  function toggleShuffle() {
+  const toggleShuffle = useCallback(() => {
     const activeQueue = playbackQueue.current;
     if (!activeQueue) return;
 
@@ -484,9 +624,9 @@ export function AudioProvider({ children }: PropsWithChildren) {
       currentIndex,
       isShuffling: true,
     });
-  }
+  }, [commitQueue]);
 
-  function toggleLoop() {
+  const toggleLoop = useCallback(() => {
     const activeQueue = playbackQueue.current;
     if (!activeQueue) return;
 
@@ -501,44 +641,81 @@ export function AudioProvider({ children }: PropsWithChildren) {
       repeatMode: nextRepeatMode,
       hasRepeatedCurrentTrack: false,
     });
-  }
+  }, [commitQueue]);
 
-  async function togglePlayback() {
+  const togglePlayback = useCallback(async () => {
     await audioEngine.togglePlayback();
-  }
+  }, []);
 
-  function pause() {
+  const pause = useCallback(() => {
     audioEngine.pause();
-  }
+  }, []);
+
+  const stopAndClearQueue = useCallback(() => {
+    prefetchGeneration.current += 1;
+    lastSavedPosition.current = { uri: null, seconds: 0, at: 0 };
+    audioEngine.stop();
+    commitQueue(null);
+  }, [commitQueue]);
+
+  const queueUris = playbackQueue.current?.order ?? EMPTY_URIS;
+  const queueIndex = playbackQueue.current?.currentIndex ?? -1;
+
+  const contextValue = useMemo<AudioReactContextValue>(
+    () => ({
+      currentUri,
+      isPlaying,
+      isLoading,
+      durationSeconds: duration,
+      seekTo: audioEngine.seekTo,
+      playTrack,
+      playPrevious,
+      playNext,
+      queueUris,
+      queueIndex,
+      playQueueTrackAt,
+      isShuffling,
+      repeatMode,
+      toggleShuffle,
+      toggleLoop,
+      togglePlayback,
+      pause,
+      stopAndClearQueue,
+    }),
+    // queueVersion forces a re-derive when a commit leaves the flags unchanged.
+    [
+      currentUri,
+      isPlaying,
+      isLoading,
+      duration,
+      playTrack,
+      playPrevious,
+      playNext,
+      queueUris,
+      queueIndex,
+      playQueueTrackAt,
+      isShuffling,
+      repeatMode,
+      toggleShuffle,
+      toggleLoop,
+      togglePlayback,
+      pause,
+      stopAndClearQueue,
+      queueVersion,
+    ],
+  );
+
+  const progressValue = useMemo<AudioProgress>(
+    () => ({ positionSeconds: currentTime }),
+    [currentTime],
+  );
 
   return (
-    <AudioReactContext.Provider
-      value={{
-        currentUri: playback.currentUri,
-        isPlaying: playback.isPlaying,
-        isLoading: playback.isLoading,
-        positionSeconds: playback.currentTime,
-        durationSeconds: playback.duration,
-        seekTo: audioEngine.seekTo,
-        playTrack,
-        playPrevious,
-        playNext,
-        queueUris: playbackQueue.current?.order ?? [],
-        queueIndex: playbackQueue.current?.currentIndex ?? -1,
-        playQueueTrackAt,
-        isShuffling,
-        repeatMode,
-        toggleShuffle,
-        toggleLoop,
-        togglePlayback,
-        pause,
-      }}
-    >
-      <StreamingAudio
-        onEnded={handleTrackEnded}
-        onEndedRespawned={handleEndedRespawned}
-      />
-      {children}
+    <AudioReactContext.Provider value={contextValue}>
+      <AudioProgressContext.Provider value={progressValue}>
+        <StreamingAudio onEnded={handleTrackEnded} />
+        {children}
+      </AudioProgressContext.Provider>
     </AudioReactContext.Provider>
   );
 }

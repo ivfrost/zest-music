@@ -1,6 +1,38 @@
 # Comments
 
-- Comment only to explain non-obvious intent, constraints, or tradeoffs.
-- Keep comments to one short, factual line.
-- Do not restate code, narrate changes, or add conversational filler.
-- Never delete a comment that explains why something is done.
+## When to write one
+
+Write a comment only when the code cannot express the reason itself:
+
+- A non-obvious constraint the code must satisfy (API limit, ordering requirement, browser/OS quirk).
+- A deliberate tradeoff (why this approach was chosen over the obvious one).
+- A workaround for an external bug or behavior you cannot fix here.
+- A public-facing contract that isn't enforced by types or tests.
+
+## When not to write one
+
+- Do not restate what the code does. `// increment counter` above `i++` is noise.
+- Do not narrate changes (`// added null check`) — that belongs in the commit message.
+- Do not add conversational filler (`// just in case`, `// hopefully works`).
+- Do not leave commented-out code. Delete it; version control remembers.
+- Do not document obvious language semantics (`// returns a promise`) — trust the reader.
+
+## Format
+
+- One short, factual line. If it needs a paragraph, the code or the design is the problem.
+- Place the comment directly above the code it explains, at the same indentation.
+- Use `TODO(name): reason` and `FIXME(name): reason` for deferred work — the name makes ownership visible.
+- Prefer naming and structure over comments. A well-named function removes the need for half the comments you'd otherwise write.
+
+## Preserving existing comments
+
+- Never delete a comment that explains *why* something is done, even if it looks redundant to you.
+- If a comment is stale (code changed, reason no longer holds), update it — do not silently remove it.
+- If a `TODO`/`FIXME` is resolved, delete it along with the code it described.
+- When refactoring, carry comments forward to the equivalent code in the new structure.
+
+## Doc comments
+
+- Public APIs get a doc comment: what it does, what it returns, what it throws, and any non-obvious precondition.
+- Internal helpers get a doc comment only if the signature doesn't make the contract obvious.
+- Do not duplicate type information that the compiler already enforces.

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import {
   type ArtistImage,
   fetchArtistImage,
+  isNetworkUnavailable,
+  noteNetworkFailure,
   readCachedArtistImages,
 } from '@/lib/artistImages';
 import type { Artist } from '@/types/artists';
@@ -36,7 +38,12 @@ export function useArtistImages(
       setImages(new Map(cached));
 
       for (const artist of artists) {
-        if (cached.has(artist.id) || failed.has(`${mode}:${artist.id}`)) {
+        if (
+          isNetworkUnavailable() ||
+          cached.has(artist.id) ||
+          failed.has(`${mode}:${artist.id}`)
+        ) {
+          if (isNetworkUnavailable()) break;
           continue;
         }
 
@@ -45,6 +52,7 @@ export function useArtistImages(
           if (cancelled) return;
           setImages(previous => new Map(previous).set(artist.id, url));
         } catch (error) {
+          if (noteNetworkFailure(error)) break;
           console.warn('[ArtistImages] Lookup failed', {
             artist: artist.name,
             error,

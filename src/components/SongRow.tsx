@@ -19,7 +19,7 @@ export function SongRow({ durationSeconds, ...props }: SongRowProps) {
       {...props}
       trailing={
         durationSeconds != null ? (
-          <Text className="ml-3 text-sm text-on-surface-variant opacity-70">
+          <Text className="ml-3 text-body-medium text-on-surface-variant opacity-70">
             {formatDuration(durationSeconds)}
           </Text>
         ) : undefined

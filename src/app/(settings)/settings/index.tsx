@@ -1,13 +1,22 @@
 import { pickDirectory } from '@react-native-documents/picker';
 import { SymbolView } from 'expo-symbols';
 import { type ReactNode, useState } from 'react';
-import { Pressable, ScrollView, Switch, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  Switch,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import RowSeparator from '@/components/RowSeparator';
 import { ICON_SIZES } from '@/hooks/materialPalette';
 import { useMaterialTheme } from '@/hooks/useMaterialTheme';
-import { usePreferences } from '@/hooks/usePreferences';
 import useMusicLocations from '@/hooks/useMusicLocation';
+import { usePreferences } from '@/hooks/usePreferences';
+import type { MusicLocation } from '@/types/musicLocation';
 import type { TapBehavior } from '@/types/preferences';
 
 const TAP_OPTIONS: { value: TapBehavior; label: string }[] = [
@@ -39,7 +48,7 @@ function folderInfo(uri: string) {
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <View>
-      <Text className="mb-2 px-1 text-sm font-medium text-on-surface-variant">
+      <Text className="mb-2 px-1 text-body-medium font-medium text-on-surface-variant">
         {title}
       </Text>
       {children}
@@ -49,9 +58,21 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 
 export default function SettingsScreen() {
   const { preferences, updatePreferences } = usePreferences();
-  const { addLocation, locations } = useMusicLocations();
-  const { colors, vars: themeVars, rippleColor, dividerColor } =
-    useMaterialTheme();
+  const {
+    addLocation,
+    isScanning,
+    locations,
+    removeLocation,
+    scanningAction,
+    scanningLocationUri,
+    scanningSongTitle,
+  } = useMusicLocations();
+  const {
+    colors,
+    vars: themeVars,
+    rippleColor,
+    dividerColor,
+  } = useMaterialTheme();
   const [isAdding, setIsAdding] = useState(false);
   const imagesDisabled = preferences.artistImages === 'off';
 
@@ -67,17 +88,36 @@ export default function SettingsScreen() {
     }
   };
 
+  const confirmRemoveLocation = (location: MusicLocation, name: string) => {
+    Alert.alert(
+      'Remove folder from library?',
+      `"${name}" will no longer be scanned and its songs will be removed from the app. The files stay on your device.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: () => {
+            removeLocation(location).catch(error =>
+              console.error('Could not remove music folder:', error),
+            );
+          },
+        },
+      ],
+    );
+  };
+
   return (
     <View style={[themeVars, { flex: 1 }]} className="bg-background">
       <SafeAreaView edges={['bottom']} className="flex-1">
         <ScrollView contentContainerClassName="px-4 py-4 pb-10">
           <View className="gap-6">
             <Section title="Playback">
-              <View className="rounded-3xl bg-surface-container p-4">
-                <Text className="text-base text-on-surface">
+              <View className="rounded-md3-xl bg-surface-container p-4">
+                <Text className="text-body-large text-on-surface">
                   Tapping the current song
                 </Text>
-                <Text className="mt-1 text-sm text-on-surface-variant opacity-70">
+                <Text className="mt-1 text-body-medium text-on-surface-variant opacity-70">
                   Choose what happens when you tap the song that is already
                   playing.
                 </Text>
@@ -88,7 +128,7 @@ export default function SettingsScreen() {
                     return (
                       <View
                         key={option.value}
-                        className="flex-1 overflow-hidden rounded-full"
+                        className="flex-1 overflow-hidden rounded-md3-full"
                       >
                         <Pressable
                           accessibilityRole="radio"
@@ -98,14 +138,17 @@ export default function SettingsScreen() {
                               currentPlayingTapBehavior: option.value,
                             })
                           }
-                          android_ripple={{ color: rippleColor, borderless: true }}
+                          android_ripple={{
+                            color: rippleColor,
+                            borderless: true,
+                          }}
                           className={`items-center py-2 ${
                             selected ? 'bg-primary-container' : ''
                           }`}
                         >
                           <Text
                             numberOfLines={1}
-                            className={`text-sm font-medium ${
+                            className={`text-body-medium font-medium ${
                               selected
                                 ? 'text-on-primary-container'
                                 : 'text-on-surface-variant'
@@ -122,13 +165,13 @@ export default function SettingsScreen() {
             </Section>
 
             <Section title="Artist images">
-              <View className="overflow-hidden rounded-3xl bg-surface-container">
+              <View className="overflow-hidden rounded-md3-xl bg-surface-container">
                 <View className="flex-row items-center gap-4 px-4 py-3">
                   <View className="flex-1">
-                    <Text className="text-base text-on-surface">
+                    <Text className="text-body-large text-on-surface">
                       Show artist images
                     </Text>
-                    <Text className="mt-0.5 text-sm text-on-surface-variant opacity-70">
+                    <Text className="mt-0.5 text-body-medium text-on-surface-variant opacity-70">
                       Portraits from Wikimedia Commons
                     </Text>
                   </View>
@@ -140,7 +183,14 @@ export default function SettingsScreen() {
                         artistImages: value ? 'wikimedia' : 'off',
                       })
                     }
-                    trackColor={{ true: colors.primary }}
+                    trackColor={{
+                      false: colors.surfaceContainerHigh,
+                      true: colors.primary,
+                    }}
+                    thumbColor={
+                      !imagesDisabled ? colors.onPrimary : colors.outline
+                    }
+                    ios_backgroundColor={colors.surfaceContainerHigh}
                   />
                 </View>
                 <RowSeparator dividerColor={dividerColor} />
@@ -149,10 +199,10 @@ export default function SettingsScreen() {
                   style={{ opacity: imagesDisabled ? 0.4 : 1 }}
                 >
                   <View className="flex-1">
-                    <Text className="text-base text-on-surface">
+                    <Text className="text-body-large text-on-surface">
                       Deezer fallback
                     </Text>
-                    <Text className="mt-0.5 text-sm text-on-surface-variant opacity-70">
+                    <Text className="mt-0.5 text-body-medium text-on-surface-variant opacity-70">
                       Look up artists missing from Wikimedia. Sends their names
                       to Deezer.
                     </Text>
@@ -166,14 +216,23 @@ export default function SettingsScreen() {
                         artistImageDeezerFallback: value,
                       })
                     }
-                    trackColor={{ true: colors.primary }}
+                    trackColor={{
+                      false: colors.surfaceContainerHigh,
+                      true: colors.primary,
+                    }}
+                    thumbColor={
+                      preferences.artistImageDeezerFallback
+                        ? colors.onPrimary
+                        : colors.outline
+                    }
+                    ios_backgroundColor={colors.surfaceContainerHigh}
                   />
                 </View>
               </View>
             </Section>
 
             <Section title="Library">
-              <View className="overflow-hidden rounded-3xl bg-surface-container">
+              <View className="overflow-hidden rounded-md3-xl bg-surface-container">
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="Add music folder"
@@ -185,7 +244,7 @@ export default function SettingsScreen() {
                   }
                   className="flex-row items-center gap-4 px-4 py-2"
                 >
-                  <View className="h-14 w-14 items-center justify-center rounded-md bg-surface-variant">
+                  <View className="h-14 w-14 items-center justify-center rounded-md3-sm bg-surface-variant">
                     <SymbolView
                       name={{
                         ios: 'folder.badge.plus',
@@ -197,10 +256,10 @@ export default function SettingsScreen() {
                     />
                   </View>
                   <View className="flex-1">
-                    <Text className="text-base leading-5 text-on-surface">
+                    <Text className="text-body-large text-on-surface">
                       Add music folder
                     </Text>
-                    <Text className="mt-0.5 text-sm leading-5 text-on-surface-variant opacity-60">
+                    <Text className="mt-0.5 text-body-medium text-on-surface-variant opacity-60">
                       {isAdding
                         ? 'Opening folder picker…'
                         : 'Choose a folder to scan for music'}
@@ -210,11 +269,13 @@ export default function SettingsScreen() {
 
                 {locations.map(location => {
                   const { name, volume } = folderInfo(location.uri);
+                  const isScanningThis =
+                    isScanning && scanningLocationUri === location.uri;
                   return (
                     <View key={location.uri}>
                       <RowSeparator dividerColor={dividerColor} />
                       <View className="flex-row items-center gap-4 px-4 py-2">
-                        <View className="h-14 w-14 items-center justify-center rounded-md bg-surface-variant">
+                        <View className="h-14 w-14 items-center justify-center rounded-md3-sm bg-surface-variant">
                           <SymbolView
                             name={{
                               ios: 'folder',
@@ -228,19 +289,61 @@ export default function SettingsScreen() {
                         <View className="flex-1">
                           <Text
                             numberOfLines={1}
-                            className="text-base leading-5 text-on-surface"
+                            className="text-body-large text-on-surface"
                           >
                             {name}
                           </Text>
-                          {volume ? (
+                          {isScanningThis ? (
                             <Text
                               numberOfLines={1}
-                              className="mt-0.5 text-sm leading-5 text-on-surface-variant opacity-60"
+                              className="mt-0.5 text-body-medium text-on-surface-variant opacity-60"
+                            >
+                              {scanningSongTitle ??
+                                (scanningAction === 'remove'
+                                  ? 'Removing…'
+                                  : 'Scanning…')}
+                            </Text>
+                          ) : volume ? (
+                            <Text
+                              numberOfLines={1}
+                              className="mt-0.5 text-body-medium text-on-surface-variant opacity-60"
                             >
                               {`${volume.charAt(0).toUpperCase()}${volume.slice(1)} storage`}
                             </Text>
                           ) : null}
                         </View>
+                        {isScanningThis ? (
+                          <View className="h-10 w-10 items-center justify-center">
+                            <ActivityIndicator
+                              size="small"
+                              color={colors.onSurfaceVariant}
+                            />
+                          </View>
+                        ) : (
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Remove ${name}`}
+                            hitSlop={8}
+                            android_ripple={{
+                              color: rippleColor,
+                              borderless: true,
+                            }}
+                            onPress={() =>
+                              confirmRemoveLocation(location, name)
+                            }
+                            className="h-10 w-10 items-center justify-center rounded-md3-full"
+                          >
+                            <SymbolView
+                              name={{
+                                ios: 'trash',
+                                android: 'delete',
+                                web: 'delete',
+                              }}
+                              size={ICON_SIZES.medium}
+                              tintColor={colors.onSurfaceVariant}
+                            />
+                          </Pressable>
+                        )}
                       </View>
                     </View>
                   );
@@ -249,7 +352,7 @@ export default function SettingsScreen() {
                 {locations.length === 0 ? (
                   <>
                     <RowSeparator dividerColor={dividerColor} />
-                    <Text className="px-4 py-3 text-sm text-on-surface-variant opacity-70">
+                    <Text className="px-4 py-3 text-body-medium text-on-surface-variant opacity-70">
                       No folders added yet
                     </Text>
                   </>

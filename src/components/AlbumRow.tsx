@@ -1,5 +1,6 @@
+import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
-import { Image, Pressable, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { ICON_SIZES } from '@/hooks/materialPalette';
 import { imageSource } from '@/lib/http';
 
@@ -27,13 +28,14 @@ export function AlbumRow({
       style={({ pressed }) => (pressed ? { opacity: 0.6 } : undefined)}
       className="w-36"
     >
-      <View className="aspect-square w-36 overflow-hidden rounded-xl bg-surface-variant">
+      <View className="aspect-square w-36 overflow-hidden rounded-md3-md bg-surface-variant">
         {artworkUri ? (
           <Image
             accessible={false}
             source={imageSource(artworkUri)}
-            className="h-full w-full rounded-xl"
-            resizeMode="cover"
+            style={{ width: '100%', height: '100%' }}
+            contentFit="cover"
+            cachePolicy="memory-disk"
           />
         ) : (
           <View className="h-full w-full items-center justify-center">
@@ -48,7 +50,7 @@ export function AlbumRow({
       <Text
         numberOfLines={1}
         ellipsizeMode="tail"
-        className="mt-2 text-base leading-5 text-on-surface"
+        className="mt-2 text-body-large text-on-surface"
       >
         {title}
       </Text>
@@ -56,7 +58,7 @@ export function AlbumRow({
         <Text
           numberOfLines={1}
           ellipsizeMode="tail"
-          className="mt-0.5 text-sm leading-5 text-on-surface-variant opacity-60"
+          className="mt-0.5 text-body-medium text-on-surface-variant opacity-60"
         >
           {subtitle}
         </Text>

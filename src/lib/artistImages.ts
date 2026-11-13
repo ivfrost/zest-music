@@ -1,3 +1,5 @@
+import { Directory, File, Paths } from 'expo-file-system';
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { USER_AGENT } from '@/lib/http';
 import { STORAGE_KEYS, storage } from '@/lib/storage';
 import type { Artist } from '@/types/artists';
@@ -19,15 +21,27 @@ const LAST_SEEN_RESOLUTION_MS = 24 * 60 * 60 * 1000;
 /** Ignore loose MusicBrainz name matches to avoid the wrong person. */
 const MIN_MATCH_SCORE = 90;
 const RETRY_DELAY_MS = 2_000;
+/** Back off briefly after a DNS/network failure instead of retrying every artist. */
+const OFFLINE_RETRY_MS = 30_000;
+
+let offlineUntil = 0;
 
 type EnabledSource = Exclude<ArtistImageSource, 'off'>;
 
 type ArtistImageSize = 'thumb' | 'hero';
 
-/** A resolved artwork source; the display size picks the URL at read time. */
+/**
+ * A resolved artwork source. Remote sources pick the width at read time; a
+ * `local` entry has already been downloaded once and resized on device, so the
+ * artists tab and the artist page never fetch the same picture twice.
+ */
 export type ArtistImage =
   | { kind: 'commons'; file: string }
-  | { kind: 'deezer'; url: string };
+  | { kind: 'deezer'; url: string }
+  | { kind: 'local'; thumb: string; hero: string };
+
+const ARTIST_IMAGE_DIRECTORY = 'artist-images';
+const THUMB_WIDTH = 256;
 
 /** Deezer only serves a fixed set of square sizes, so it gets its own scale. */
 const IMAGE_WIDTHS: Record<
@@ -38,10 +52,37 @@ const IMAGE_WIDTHS: Record<
   hero: { commons: 1280, deezer: 1000 },
 };
 
+function errorText(error: unknown): string {
+  if (error instanceof Error) {
+    return `${error.message} ${error.cause ? String(error.cause) : ''}`;
+  }
+  return String(error);
+}
+
+export function isNetworkError(error: unknown): boolean {
+  return /UnknownHostException|Unable to resolve host|No address associated with hostname|Network request failed|ERR_INTERNET_DISCONNECTED|ENOTFOUND|EAI_AGAIN/i.test(
+    errorText(error),
+  );
+}
+
+export function isNetworkUnavailable(): boolean {
+  return Date.now() < offlineUntil;
+}
+
+export function noteNetworkFailure(error: unknown): boolean {
+  if (!isNetworkError(error)) return false;
+  offlineUntil = Date.now() + OFFLINE_RETRY_MS;
+  return true;
+}
+
 export function artistImageUrl(
   image: ArtistImage,
   size: ArtistImageSize,
 ): string {
+  if (image.kind === 'local') {
+    return size === 'thumb' ? image.thumb : image.hero;
+  }
+
   if (image.kind === 'commons') {
     const width = IMAGE_WIDTHS[size].commons;
     return `${COMMONS_FILE_PATH}/${encodeURIComponent(image.file)}?width=${width}`;
@@ -70,12 +111,19 @@ function parseImage(raw: unknown): ArtistImage | null | undefined {
   if (raw === null) return null;
   if (!raw || typeof raw !== 'object') return undefined;
 
-  const { kind, file, url } = raw as Record<string, unknown>;
+  const { kind, file, url, thumb, hero } = raw as Record<string, unknown>;
   if (kind === 'commons' && typeof file === 'string') {
     return { kind: 'commons', file };
   }
   if (kind === 'deezer' && typeof url === 'string') {
     return { kind: 'deezer', url };
+  }
+  if (
+    kind === 'local' &&
+    typeof thumb === 'string' &&
+    typeof hero === 'string'
+  ) {
+    return { kind: 'local', thumb, hero };
   }
   return undefined;
 }
@@ -156,9 +204,15 @@ async function getJson(
   headers: Record<string, string> = {},
   attempt = 0,
 ): Promise<unknown> {
-  const response = await fetch(url, {
-    headers: { ...DEFAULT_HEADERS, ...headers },
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: { ...DEFAULT_HEADERS, ...headers },
+    });
+  } catch (error) {
+    noteNetworkFailure(error);
+    throw error;
+  }
   if (response.ok) return response.json();
 
   // MusicBrainz throttles bursts with 403/429/503; one retry is enough.
@@ -279,6 +333,7 @@ export async function readCachedArtistImages(
   const now = Date.now();
 
   const result = new Map<string, ArtistImage | null>();
+  const materialize: { artistId: string; image: ArtistImage }[] = [];
   let mutated = false;
 
   for (const artist of artists) {
@@ -291,6 +346,13 @@ export async function readCachedArtistImages(
     }
     if (now - entry.fetchedAt < CACHE_TTL_MS && matchesMode(entry, mode)) {
       result.set(artist.id, entry.image);
+
+      // Entries cached before local files existed download once, then serve
+      // both sizes from disk on the next read. Run these serially so one
+      // offline failure stops the rest instead of warning per artist.
+      if (entry.image && entry.image.kind !== 'local') {
+        materialize.push({ artistId: artist.id, image: entry.image });
+      }
     }
   }
 
@@ -298,12 +360,104 @@ export async function readCachedArtistImages(
   const present = new Set(artists.map(artist => artist.id));
   for (const id of Object.keys(index)) {
     if (present.has(id) || index[id].lastSeenAt > cutoff) continue;
+    deleteArtistImageFiles(id);
     delete index[id];
     mutated = true;
   }
 
   if (mutated) void persistCache();
+
+  if (materialize.length > 0) {
+    void (async () => {
+      for (const { artistId, image } of materialize) {
+        if (isNetworkUnavailable()) return;
+        const entry = index[artistId];
+        if (!entry || entry.image !== image) continue;
+
+        const materialized = await materializeArtistImage(artistId, image);
+        if (materialized === image) continue;
+        entry.image = materialized;
+        void persistCache();
+      }
+    })();
+  }
+
   return result;
+}
+
+function artistImageDirectory(): Directory {
+  const directory = new Directory(Paths.document, ARTIST_IMAGE_DIRECTORY);
+  if (!directory.exists) {
+    directory.create({ intermediates: true, idempotent: true });
+  }
+  return directory;
+}
+
+/** Best effort: a leftover file is harmless, a crash during prune is not. */
+function deleteArtistImageFiles(artistId: string) {
+  try {
+    const directory = artistImageDirectory();
+    for (const name of [`${artistId}-hero.jpg`, `${artistId}-thumb.jpg`]) {
+      const file = new File(directory, name);
+      if (file.exists) file.delete();
+    }
+  } catch {
+    // Ignore: maintenance will not retry, the cache entry is already gone.
+  }
+}
+
+/** Artist ids whose download is already running, so reads do not duplicate it. */
+const materializing = new Set<string>();
+
+/**
+ * Downloads the hero once and writes a thumb beside it. Returns a `local` image
+ * on success, or the original remote source if anything fails.
+ */
+async function materializeArtistImage(
+  artistId: string,
+  image: ArtistImage,
+): Promise<ArtistImage> {
+  if (
+    image.kind === 'local' ||
+    materializing.has(artistId) ||
+    isNetworkUnavailable()
+  ) {
+    return image;
+  }
+
+  materializing.add(artistId);
+  try {
+    const directory = artistImageDirectory();
+    const heroFile = new File(directory, `${artistId}-hero.jpg`);
+    const thumbFile = new File(directory, `${artistId}-thumb.jpg`);
+
+    if (!heroFile.exists) {
+      await File.downloadFileAsync(artistImageUrl(image, 'hero'), heroFile);
+    }
+
+    if (!thumbFile.exists) {
+      const context = ImageManipulator.manipulate(heroFile.uri);
+      context.resize({ width: THUMB_WIDTH });
+      const rendered = await context.renderAsync();
+      const saved = await rendered.saveAsync({
+        compress: 0.85,
+        format: SaveFormat.JPEG,
+      });
+      new File(saved.uri).move(thumbFile, { overwrite: true });
+    }
+
+    return { kind: 'local', thumb: thumbFile.uri, hero: heroFile.uri };
+  } catch (error) {
+    if (!noteNetworkFailure(error)) {
+      console.warn('[ArtistImages] Could not cache image locally', {
+        artistId,
+        error,
+      });
+    }
+    return image;
+  } finally {
+    materializing.delete(artistId);
+  }
 }
 
 export async function fetchArtistImage(
@@ -317,13 +471,15 @@ export async function fetchArtistImage(
     image = await findDeezerImage(artist.name);
   }
 
+  const cached = image ? await materializeArtistImage(artist.id, image) : null;
+
   const now = Date.now();
   index[artist.id] = {
-    image,
+    image: cached,
     lookedWith: mode,
     fetchedAt: now,
     lastSeenAt: now,
   };
   void persistCache();
-  return image;
+  return cached;
 }

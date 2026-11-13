@@ -16,7 +16,7 @@ export default function ArtistsLayout() {
         name="index"
         options={{ title: 'Artists', headerShown: false }}
       />
-      <Stack.Screen name="[id]" options={{ headerShown: false }} />
+      <Stack.Screen name="artists/[id]" options={{ headerShown: false }} />
     </Stack>
   );
 }

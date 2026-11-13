@@ -1,6 +1,7 @@
+import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import type { ComponentProps, ReactNode } from 'react';
-import { Image, Pressable, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { ICON_SIZES } from '@/hooks/materialPalette';
 import { imageSource } from '@/lib/http';
 
@@ -41,13 +42,14 @@ export function Row({
       android_ripple={{ color: rippleColor }}
       className="flex-row items-center gap-4 px-4 py-2"
     >
-      <View className="h-14 w-14 overflow-hidden rounded-md bg-surface-variant">
+      <View className="h-14 w-14 overflow-hidden rounded-md3-sm bg-surface-variant">
         {artworkUri ? (
           <Image
             accessible={false}
             source={imageSource(artworkUri)}
-            className="h-full w-full rounded-md"
-            resizeMode="cover"
+            style={{ width: '100%', height: '100%' }}
+            contentFit="cover"
+            cachePolicy="memory-disk"
           />
         ) : (
           <View className="h-full w-full items-center justify-center">
@@ -64,7 +66,7 @@ export function Row({
         <Text
           numberOfLines={1}
           ellipsizeMode="tail"
-          className="text-base leading-5 text-on-surface"
+          className="text-body-large text-on-surface"
         >
           {title}
         </Text>
@@ -72,7 +74,7 @@ export function Row({
           <Text
             numberOfLines={1}
             ellipsizeMode="tail"
-            className="mt-0.5 text-base leading-5 text-on-surface-variant opacity-60"
+            className="mt-0.5 text-body-medium text-on-surface-variant opacity-60"
           >
             {subtitle}
           </Text>
@@ -83,7 +85,11 @@ export function Row({
 
       {showChevron ? (
         <SymbolView
-          name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
+          name={{
+            ios: 'chevron.right',
+            android: 'chevron_right',
+            web: 'chevron_right',
+          }}
           size={ICON_SIZES.small}
           tintColor={iconColor}
         />

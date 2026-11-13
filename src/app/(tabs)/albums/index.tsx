@@ -4,18 +4,20 @@ import {
   FlatList,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
-  Pressable,
   Text,
   View,
 } from 'react-native';
 import { getSongDisplayInfo } from '@/audio/trackHelpers';
+import { FilterDropdown } from '@/components/FilterDropdown';
 import { Row } from '@/components/Row';
 import { useRowSeparator } from '@/components/RowSeparator';
+import { TabMenuButton } from '@/components/TabMenuButton';
 import { TabScreen } from '@/components/TabScreen';
 import { useMaterialTheme } from '@/hooks/useMaterialTheme';
 import useMusicLocations from '@/hooks/useMusicLocation';
 import { setAlbumFilter } from '@/lib/albumFilter';
 import { usePlayStats } from '@/lib/playStats';
+import { spacing } from '@/theme';
 import type { ReleaseSummary } from '@/types/releases';
 import type { Song } from '@/types/songs';
 
@@ -23,10 +25,12 @@ const MODES = ['all', 'recent', 'most'] as const;
 type Mode = (typeof MODES)[number];
 
 const MODE_LABELS: Record<Mode, string> = {
-  all: 'All albums',
+  all: 'All',
   recent: 'Recent',
   most: 'Most played',
 };
+
+const MODE_OPTIONS = MODES.map(option => MODE_LABELS[option]);
 
 type AlbumEntry = {
   release: ReleaseSummary;
@@ -41,7 +45,7 @@ export default function AlbumsTab() {
     releases,
     songs,
     artistNameById,
-    isLoading: isLibraryLoading,
+    isScanning: isLibraryLoading,
   } = useMusicLocations();
   const { colors, rippleColor, dividerColor } = useMaterialTheme();
   const renderSeparator = useRowSeparator(dividerColor, 88);
@@ -95,8 +99,7 @@ export default function AlbumsTab() {
     const most = rows
       .filter(entry => entry.playCount > 0)
       .sort(
-        (a, b) =>
-          b.playCount - a.playCount || b.lastPlayedAt - a.lastPlayedAt,
+        (a, b) => b.playCount - a.playCount || b.lastPlayedAt - a.lastPlayedAt,
       );
 
     return { all, recent, most };
@@ -137,40 +140,29 @@ export default function AlbumsTab() {
   return (
     <TabScreen>
       <View className="flex-1">
-        <View className="overflow-hidden rounded-3xl bg-surface-container">
-          <View className="flex-row gap-1 p-2">
-            {MODES.map(option => {
-              const selected = mode === option;
-              return (
-                <View
-                  key={option}
-                  className="flex-1 overflow-hidden rounded-full"
-                >
-                  <Pressable
-                    accessibilityRole="tab"
-                    accessibilityState={{ selected }}
-                    onPress={() => setMode(option)}
-                    android_ripple={{ color: rippleColor, borderless: true }}
-                    className={`items-center py-2 ${selected ? 'bg-primary-container' : ''}`}
-                  >
-                    <Text
-                      numberOfLines={1}
-                      className={`text-sm font-medium ${
-                        selected
-                          ? 'text-on-primary-container'
-                          : 'text-on-surface-variant'
-                      }`}
-                    >
-                      {MODE_LABELS[option]}
-                    </Text>
-                  </Pressable>
-                </View>
-              );
-            })}
-          </View>
+        <View className="h-12 flex-row items-center gap-2">
+          <Text
+            accessibilityRole="header"
+            numberOfLines={1}
+            className="text-title-large font-medium text-on-surface"
+          >
+            Albums
+          </Text>
+          <View className="flex-1" />
+          <FilterDropdown
+            label={MODE_LABELS[mode]}
+            options={MODE_OPTIONS}
+            selectedIndex={MODES.indexOf(mode)}
+            onSelect={index => {
+              const next = MODES[index];
+              if (next) setMode(next);
+            }}
+            accessibilityLabel="Filter albums"
+          />
+          <TabMenuButton />
         </View>
 
-        <View className="mt-3 max-h-full shrink overflow-hidden rounded-3xl bg-surface-container-low">
+        <View className="mt-3 max-h-full shrink overflow-hidden rounded-md3-xl bg-surface-container-low">
           <FlatList
             ref={listRef}
             data={visibleAlbums}
@@ -179,11 +171,16 @@ export default function AlbumsTab() {
             scrollEventThrottle={16}
             onContentSizeChange={restoreOffset}
             extraData={mode}
-            className="grow-0"
-            contentContainerClassName="py-2"
+            className="shrink"
+            contentContainerStyle={{
+              paddingTop: spacing.xs,
+              paddingBottom: spacing.sm,
+            }}
             ItemSeparatorComponent={renderSeparator}
             ListEmptyComponent={
-              <Text className="p-6 text-on-surface-variant">{emptyMessage}</Text>
+              <Text className="p-6 text-on-surface-variant">
+                {emptyMessage}
+              </Text>
             }
             renderItem={({ item }) => (
               <Row

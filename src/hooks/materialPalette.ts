@@ -1,40 +1,43 @@
-/** Neutral Material 3 fallback for devices without Android dynamic colors. */
+/**
+ * Material 3 neutral fallback for devices without Android dynamic colors. Values
+ * follow the standard role-to-tone mapping for a neutral (achromatic) seed.
+ */
 export const LIGHT_MATERIAL_COLORS = {
-  primary: '#515F65',
+  primary: '#5E5E5E',
   onPrimary: '#FFFFFF',
-  primaryContainer: '#D5E4E9',
-  onPrimaryContainer: '#101D22',
-  background: '#F7F9FA',
-  onBackground: '#191C1E',
-  surface: '#F7F9FA',
-  onSurface: '#191C1E',
-  surfaceVariant: '#DEE3E6',
-  onSurfaceVariant: '#41484B',
-  surfaceContainerLow: '#F1F4F5',
-  surfaceContainer: '#EBEFF0',
-  surfaceContainerHigh: '#E5E9EB',
-  outline: '#72787B',
-  outlineVariant: '#C2C8CB',
+  primaryContainer: '#E2E2E2',
+  onPrimaryContainer: '#1B1B1B',
+  background: '#F9F9F9',
+  onBackground: '#1B1B1B',
+  surface: '#F9F9F9',
+  onSurface: '#1B1B1B',
+  surfaceVariant: '#E2E2E2',
+  onSurfaceVariant: '#474747',
+  surfaceContainerLow: '#F3F3F3',
+  surfaceContainer: '#EEEEEE',
+  surfaceContainerHigh: '#E8E8E8',
+  outline: '#777777',
+  outlineVariant: '#C6C6C6',
 };
 
 type MaterialPalette = typeof LIGHT_MATERIAL_COLORS;
 
 export const DARK_MATERIAL_COLORS: MaterialPalette = {
-  primary: '#BBC8CD',
-  onPrimary: '#263238',
-  primaryContainer: '#3D4A50',
-  onPrimaryContainer: '#D5E4E9',
-  background: '#111416',
-  onBackground: '#E1E3E5',
-  surface: '#111416',
-  onSurface: '#E1E3E5',
-  surfaceVariant: '#41484B',
-  onSurfaceVariant: '#C2C8CB',
-  surfaceContainerLow: '#191C1E',
-  surfaceContainer: '#1D2022',
-  surfaceContainerHigh: '#272A2C',
-  outline: '#8C9295',
-  outlineVariant: '#41484B',
+  primary: '#C6C6C6',
+  onPrimary: '#303030',
+  primaryContainer: '#474747',
+  onPrimaryContainer: '#E2E2E2',
+  background: '#141414',
+  onBackground: '#E2E2E2',
+  surface: '#141414',
+  onSurface: '#E2E2E2',
+  surfaceVariant: '#474747',
+  onSurfaceVariant: '#C6C6C6',
+  surfaceContainerLow: '#1B1B1B',
+  surfaceContainer: '#202020',
+  surfaceContainerHigh: '#2A2A2A',
+  outline: '#919191',
+  outlineVariant: '#474747',
 };
 
 export const ICON_SIZES = {

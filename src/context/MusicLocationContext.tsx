@@ -1,13 +1,6 @@
-import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/expo-sqlite';
-import { CryptoDigestAlgorithm, digest, randomUUID } from 'expo-crypto';
-import { Directory, File, Paths } from 'expo-file-system';
+import { Directory } from 'expo-file-system';
 import { useSQLiteContext } from 'expo-sqlite';
-import {
-  type IAudioMetadata,
-  type IPicture,
-  parseFromTokenizer,
-} from 'music-metadata';
 import {
   createContext,
   type PropsWithChildren,
@@ -17,138 +10,53 @@ import {
   useRef,
   useState,
 } from 'react';
-import { fromBlob } from 'strtok3';
-import * as schema from '@/db/schema';
-
-import { AudioFileBlob } from '@/lib/audioFileBlob';
-import { titleFromFilename } from '@/lib/musicMetadata';
+import { audioEngine } from '@/audio/audioEngine';
+import {
+  deleteSongsBatch,
+  deleteSongsByUriPrefix,
+  deleteSongsByUris,
+  purgeOrphanedRows,
+  readLibrary,
+} from '@/db/library';
+import { indexAudioFile } from '@/lib/musicIndexer';
+import {
+  addMusicLocation,
+  loadMusicLocations,
+  removeMusicLocation,
+} from '@/lib/musicLocations';
+import {
+  collectAudioUris,
+  createProgressFlusher,
+  isAudioFile,
+} from '@/lib/musicScan';
 import { STORAGE_KEYS, storage } from '@/lib/storage';
 import type { Artist } from '@/types/artists';
-import { type MusicLocation, MusicLocationSchema } from '@/types/musicLocation';
-import type { ReleaseSummary, ReleaseType } from '@/types/releases';
+import type { MusicLocation } from '@/types/musicLocation';
+import type { ReleaseSummary } from '@/types/releases';
 import type { Song } from '@/types/songs';
 
-async function loadMusicLocations(): Promise<MusicLocation[]> {
-  const key = STORAGE_KEYS.musicLocations;
-  const json = await storage.getItem(key);
-  if (json === null) return [];
-
-  let value: unknown;
-  try {
-    value = JSON.parse(json);
-  } catch {
-    console.warn('Malformed music locations JSON; removing item from storage.');
-    await storage.removeItem(key);
-    return [];
-  }
-
-  const result = MusicLocationSchema.array().safeParse(value);
-  if (result.success) return result.data;
-
-  console.warn('Invalid music locations schema; removing item from storage.');
-  await storage.removeItem(key);
-  return [];
-}
-
-async function addMusicLocation(
-  location: MusicLocation,
-): Promise<MusicLocation[]> {
-  const locations = await loadMusicLocations();
-  if (locations.some(saved => saved.uri === location.uri)) return locations;
-
-  const updated = [...locations, location];
-  await storage.setItem(STORAGE_KEYS.musicLocations, JSON.stringify(updated));
-  return updated;
-}
-
-const supportedAudioExtensions = new Set([
-  'aac',
-  'aif',
-  'aiff',
-  'aifc',
-  'ape',
-  'asf',
-  'caf',
-  'dff',
-  'dsf',
-  'flac',
-  'm4a',
-  'm4b',
-  'mp1',
-  'mp2',
-  'mp3',
-  'mp4',
-  'mpc',
-  'mpp',
-  'oga',
-  'ogg',
-  'opus',
-  'spx',
-  'wav',
-  'wave',
-  'wma',
-  'wv',
-]);
-
-function tagValues(value: string | string[] | undefined): string[] {
-  const values = Array.isArray(value) ? value : value ? [value] : [];
-  return [...new Set(values.map(value => value.trim()).filter(Boolean))];
-}
-
-function firstTagValue(value: string | string[] | undefined): string | null {
-  return tagValues(value)[0] ?? null;
-}
-
-function releaseTypeFromTags(metadata: IAudioMetadata['common']): ReleaseType {
-  const releaseTypes = (metadata.releasetype ?? []).join(' ').toLowerCase();
-  if (releaseTypes.includes('single')) return 'single';
-  if (releaseTypes.includes('ep')) return 'ep';
-  if (releaseTypes.includes('album')) return 'album';
-  return 'unknown';
-}
-
-const COVER_EXTENSIONS: Record<string, string> = {
-  'image/jpeg': '.jpg',
-  'image/jpg': '.jpg',
-  'image/png': '.png',
-  'image/webp': '.webp',
-  'image/gif': '.gif',
-  'image/bmp': '.bmp',
-};
-
-async function storeArtwork(
-  picture: IPicture | undefined,
-): Promise<string | null> {
-  if (!picture) return null;
-
-  const directory = new Directory(Paths.document, 'covers');
-  if (!directory.exists) {
-    directory.create({ intermediates: true, idempotent: true });
-  }
-
-  const pictureData = new Uint8Array(picture.data);
-  const digestBuffer = await digest(CryptoDigestAlgorithm.SHA256, pictureData);
-  const hash = Array.from(new Uint8Array(digestBuffer))
-    .map(byte => byte.toString(16).padStart(2, '0'))
-    .join('');
-  const extension = COVER_EXTENSIONS[picture.format.toLowerCase()] ?? '.img';
-  const file = new File(directory, `${hash}${extension}`);
-
-  if (!file.exists) {
-    await file.write(pictureData);
-  }
-
-  return file.uri;
-}
+const PURGE_BATCH_SIZE = 200;
+const SONG_REPORT_INTERVAL_MS = 250;
 
 type MusicLocationsContextValue = {
   locations: MusicLocation[];
   songs: Song[];
   artists: Artist[];
   releases: ReleaseSummary[];
-  isLoading: boolean;
+  /** Display data for a track still playing after its folder was removed. */
+  removedNowPlaying: {
+    title: string;
+    artist: string;
+    album: string | null;
+    artworkUri: string | null;
+  } | null;
+  isScanning: boolean;
+  scanningLocationUri: string | null;
+  scanningSongTitle: string | null;
+  scanningAction: 'scan' | 'remove';
   addLocation: (location: MusicLocation) => Promise<MusicLocation[]>;
   removeAllMusicLocations: () => Promise<MusicLocation[]>;
+  removeLocation: (location: MusicLocation) => Promise<MusicLocation[]>;
   refresh: () => Promise<MusicLocation[]>;
   scanSavedLocations: () => Promise<Song[]>;
   releaseById: Map<string, ReleaseSummary>;
@@ -162,231 +70,90 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
   const sqlite = useSQLiteContext();
   const db = useMemo(() => drizzle(sqlite), [sqlite]);
   const scanGeneration = useRef(0);
+  const locationRevision = useRef(0);
   const [locations, setLocations] = useState<MusicLocation[]>([]);
   const [songs, setSongs] = useState<Song[]>([]);
   const [artists, setArtists] = useState<Artist[]>([]);
   const [releases, setReleases] = useState<ReleaseSummary[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-
-  const findOrCreateRelease = useCallback(
-    async (
-      title: string,
-      type: ReleaseType,
-      musicBrainzId: string | null,
-      musicBrainzReleaseGroupId: string | null,
-      artworkUri: string | null,
-    ): Promise<string> => {
-      const byMusicBrainzId = musicBrainzId
-        ? await db
-            .select({ id: schema.releases.id })
-            .from(schema.releases)
-            .where(eq(schema.releases.musicBrainzId, musicBrainzId))
-            .limit(1)
-        : [];
-      const existing =
-        byMusicBrainzId[0] ??
-        (
-          await db
-            .select({ id: schema.releases.id })
-            .from(schema.releases)
-            .where(
-              and(
-                eq(schema.releases.title, title),
-                eq(schema.releases.type, type),
-              ),
-            )
-            .limit(1)
-        )[0];
-
-      if (existing) {
-        if (musicBrainzId || musicBrainzReleaseGroupId || artworkUri) {
-          await db
-            .update(schema.releases)
-            .set({
-              musicBrainzId,
-              musicBrainzReleaseGroupId,
-              ...(artworkUri ? { artworkUri } : {}),
-            })
-            .where(eq(schema.releases.id, existing.id));
-        }
-        return existing.id;
-      }
-
-      const id = randomUUID();
-      await db.insert(schema.releases).values({
-        id,
-        title,
-        type,
-        artworkUri,
-        musicBrainzId,
-        musicBrainzReleaseGroupId,
-      });
-      if (__DEV__) console.info('[MusicLibrary] Created release', {
-        id,
-        title,
-        type,
-        artworkUri,
-        musicBrainzId,
-        musicBrainzReleaseGroupId,
-      });
-      return id;
-    },
-    [db],
+  const [isScanning, setIsScanning] = useState(true);
+  const [scanningLocationUri, setScanningLocationUri] = useState<string | null>(
+    null,
+  );
+  const [scanningSongTitle, setScanningSongTitle] = useState<string | null>(
+    null,
+  );
+  const [scanningAction, setScanningAction] = useState<'scan' | 'remove'>(
+    'scan',
   );
 
-  const findOrCreateArtists = useCallback(
-    async (
-      names: string[],
-      musicBrainzIds: (string | null)[],
-    ): Promise<string[]> => {
-      const ids: string[] = [];
+  const lastSongReport = useRef(0);
+  // Indexing is much faster than rendering, so only surface the newest title.
+  const reportSong = useCallback((title: string) => {
+    const now = Date.now();
+    if (now - lastSongReport.current < SONG_REPORT_INTERVAL_MS) return;
+    lastSongReport.current = now;
+    setScanningSongTitle(title);
+  }, []);
 
-      for (const [index, name] of names.entries()) {
-        const musicBrainzId = musicBrainzIds[index] ?? null;
-        const byMusicBrainzId = musicBrainzId
-          ? await db
-              .select({ id: schema.artists.id })
-              .from(schema.artists)
-              .where(eq(schema.artists.musicBrainzId, musicBrainzId))
-              .limit(1)
-          : [];
-        const existing =
-          byMusicBrainzId[0] ??
-          (
-            await db
-              .select({ id: schema.artists.id })
-              .from(schema.artists)
-              .where(eq(schema.artists.name, name))
-              .limit(1)
-          )[0];
-
-        if (existing) {
-          if (musicBrainzId) {
-            await db
-              .update(schema.artists)
-              .set({ musicBrainzId })
-              .where(eq(schema.artists.id, existing.id));
-          }
-          ids.push(existing.id);
-          continue;
-        }
-
-        const id = randomUUID();
-        await db.insert(schema.artists).values({ id, name, musicBrainzId });
-        if (__DEV__) console.info('[MusicLibrary] Created artist', {
-          id,
-          name,
-          musicBrainzId,
-        });
-        ids.push(id);
-      }
-
-      return ids;
-    },
-    [db],
-  );
+  // Mirrors of the published state, readable by callbacks without re-creating them.
+  const songsRef = useRef<Song[]>([]);
+  const artistsRef = useRef<Artist[]>([]);
+  const releasesRef = useRef<ReleaseSummary[]>([]);
+  /** Song kept on screen while it plays after its folder was removed. */
+  const removedSongRef = useRef<Song | null>(null);
+  const [removedNowPlaying, setRemovedNowPlaying] = useState<{
+    title: string;
+    artist: string;
+    album: string | null;
+    artworkUri: string | null;
+  } | null>(null);
 
   const loadLibraryFromDatabase = useCallback(
-    async (source: string): Promise<Song[]> => {
-      const [songRows, artistRows, releaseRows] = await Promise.all([
-        db
-          .select({
-            id: schema.songs.id,
-            title: schema.songs.title,
-            uri: schema.songs.uri,
-            size: schema.songs.size,
-            duration: schema.songs.duration,
-            playCount: schema.songs.playCount,
-            lastPlayedAt: schema.songs.lastPlayedAt,
-            trackNumber: schema.songs.trackNumber,
-            releaseId: schema.songs.releaseId,
-            musicBrainzRecordingId: schema.songs.musicBrainzRecordingId,
-            musicBrainzTrackId: schema.songs.musicBrainzTrackId,
-            artistId: schema.releaseArtists.artistId,
-          })
-          .from(schema.songs)
-          .leftJoin(
-            schema.releaseArtists,
-            eq(schema.songs.releaseId, schema.releaseArtists.releaseId),
-          ),
-        db
-          .select({
-            id: schema.artists.id,
-            name: schema.artists.name,
-            musicBrainzId: schema.artists.musicBrainzId,
-            releaseId: schema.releaseArtists.releaseId,
-          })
-          .from(schema.artists)
-          .leftJoin(
-            schema.releaseArtists,
-            eq(schema.artists.id, schema.releaseArtists.artistId),
-          ),
-        db
-          .select({
-            id: schema.releases.id,
-            title: schema.releases.title,
-            artworkUri: schema.releases.artworkUri,
-          })
-          .from(schema.releases),
-      ]);
+    async (source: string, shouldApply?: () => boolean): Promise<Song[]> => {
+      const library = await readLibrary(db, source);
+      // A superseded scan must not publish its snapshot over newer state.
+      if (shouldApply && !shouldApply()) return library.songs;
 
-      const songsById = new Map<string, Song>();
-      for (const row of songRows) {
-        let song = songsById.get(row.id);
-        if (!song) {
-          song = {
-            id: row.id,
-            title: row.title,
-            uri: row.uri,
-            size: row.size,
-            duration: row.duration,
-            playCount: row.playCount,
-            lastPlayedAt: row.lastPlayedAt,
-            trackNumber: row.trackNumber,
-            releaseId: row.releaseId,
-            musicBrainzRecordingId: row.musicBrainzRecordingId,
-            musicBrainzTrackId: row.musicBrainzTrackId,
-            artistIds: [],
-          };
-          songsById.set(song.id, song);
-        }
-        if (row.artistId && !song.artistIds.includes(row.artistId)) {
-          song.artistIds.push(row.artistId);
-        }
+      // Stop overriding the player once the track is gone for good or back in the
+      // library. The lists themselves never contain it.
+      const removedSong = removedSongRef.current;
+      if (
+        removedSong &&
+        (removedSong.uri !== audioEngine.getSnapshot().currentUri ||
+          library.songs.some(song => song.uri === removedSong.uri))
+      ) {
+        removedSongRef.current = null;
+        setRemovedNowPlaying(null);
       }
 
-      const artistsById = new Map<string, Artist>();
-      for (const row of artistRows) {
-        let artist = artistsById.get(row.id);
-        if (!artist) {
-          artist = {
-            id: row.id,
-            name: row.name,
-            musicBrainzId: row.musicBrainzId,
-            releaseIds: [],
-          };
-          artistsById.set(artist.id, artist);
-        }
-        if (row.releaseId && !artist.releaseIds.includes(row.releaseId)) {
-          artist.releaseIds.push(row.releaseId);
-        }
-      }
-
-      const loadedSongs = [...songsById.values()];
-      const loadedArtists = [...artistsById.values()];
-      if (__DEV__) console.info('[MusicLibrary] Read songs and artists from database', {
-        source,
-        songCount: loadedSongs.length,
-        artistCount: loadedArtists.length,
-        releaseCount: releaseRows.length,
-      });
-      setSongs(loadedSongs);
-      setArtists(loadedArtists.sort((a, b) => a.name.localeCompare(b.name)));
-      setReleases(releaseRows);
-      return loadedSongs;
+      songsRef.current = library.songs;
+      artistsRef.current = library.artists;
+      releasesRef.current = library.releases;
+      setSongs(library.songs);
+      setArtists(library.artists);
+      setReleases(library.releases);
+      return library.songs;
     },
     [db],
   );
+
+  // Drops the override once playback leaves the removed track.
+  useEffect(() => {
+    let lastUri = audioEngine.getSnapshot().currentUri;
+    const unsubscribe = audioEngine.subscribe(() => {
+      const currentUri = audioEngine.getSnapshot().currentUri;
+      if (currentUri === lastUri) return;
+      lastUri = currentUri;
+
+      const removedSong = removedSongRef.current;
+      if (!removedSong || removedSong.uri === currentUri) return;
+      removedSongRef.current = null;
+      setRemovedNowPlaying(null);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, []);
 
   const scanLocations = useCallback(
     async (
@@ -396,6 +163,11 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
       const generation = ++scanGeneration.current;
       const isCancelled = () => generation !== scanGeneration.current;
 
+      // Publishes progress mid-scan; the reload at the end stays authoritative.
+      const flusher = createProgressFlusher(() =>
+        loadLibraryFromDatabase(source, () => !isCancelled()),
+      );
+
       async function visit(directory: Directory): Promise<void> {
         if (isCancelled()) return;
         for (const item of directory.list()) {
@@ -404,182 +176,73 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
             await visit(item);
             continue;
           }
-
-          const extension = item.name.split('.').pop()?.toLowerCase();
-          if (
-            !(item instanceof File) ||
-            !extension ||
-            !supportedAudioExtensions.has(extension)
-          ) {
-            continue;
-          }
+          if (!isAudioFile(item)) continue;
 
           try {
-            const tokenizer = fromBlob(
-              new AudioFileBlob(item) as unknown as Blob,
-              {
-                fileInfo: { path: item.name, size: item.size },
-              },
-            );
-            let metadata: IAudioMetadata;
-            try {
-              metadata = await parseFromTokenizer(tokenizer);
-            } finally {
-              await tokenizer.close();
-            }
-
-            const tags = metadata.common;
-            const rawDuration = metadata.format.duration;
-            const duration =
-              typeof rawDuration === 'number' && Number.isFinite(rawDuration)
-                ? Math.round(rawDuration)
-                : null;
-            const title = tags.title?.trim() || titleFromFilename(item.name);
-
-            const releaseTitle = tags.album?.trim() || 'Unknown Album';
-            const musicBrainzReleaseId = firstTagValue(
-              tags.musicbrainz_albumid,
-            );
-            const musicBrainzReleaseGroupId = firstTagValue(
-              tags.musicbrainz_releasegroupid,
-            );
-            const artworkUri = await storeArtwork(tags.picture?.[0]);
-            const releaseId = await findOrCreateRelease(
-              releaseTitle,
-              releaseTypeFromTags(tags),
-              musicBrainzReleaseId,
-              musicBrainzReleaseGroupId,
-              artworkUri,
-            );
-
-            const albumArtistNames = tagValues(
-              tags.albumartists ?? tags.albumartist,
-            );
-            const trackArtistNames = tagValues(tags.artists ?? tags.artist);
-            const tagArtistNames = albumArtistNames.length
-              ? albumArtistNames
-              : trackArtistNames;
-            const names = tagArtistNames.length
-              ? tagArtistNames
-              : ['Unknown Artist'];
-            const rawArtistIds = tagValues(
-              albumArtistNames.length
-                ? tags.musicbrainz_albumartistid
-                : tags.musicbrainz_artistid,
-            );
-            const artistMusicBrainzIds =
-              rawArtistIds.length === names.length
-                ? rawArtistIds
-                : names.length === 1
-                  ? [rawArtistIds[0] ?? null]
-                  : [];
-            const artistIds = await findOrCreateArtists(
-              names,
-              artistMusicBrainzIds,
-            );
-
-            for (const artistId of artistIds) {
-              await db
-                .insert(schema.releaseArtists)
-                .values({
-                  releaseId,
-                  artistId,
-                  role: albumArtistNames.length ? 'albumArtist' : 'artist',
-                })
-                .onConflictDoNothing();
-            }
-
-            const musicBrainzRecordingId = firstTagValue(
-              tags.musicbrainz_recordingid,
-            );
-            const musicBrainzTrackId = firstTagValue(tags.musicbrainz_trackid);
-            const trackNumber = tags.track?.no ?? null;
-            const byMusicBrainzId = musicBrainzRecordingId
-              ? await db
-                  .select({ id: schema.songs.id })
-                  .from(schema.songs)
-                  .where(
-                    eq(
-                      schema.songs.musicBrainzRecordingId,
-                      musicBrainzRecordingId,
-                    ),
-                  )
-                  .limit(1)
-              : [];
-            const existingSong =
-              byMusicBrainzId[0] ??
-              (
-                await db
-                  .select({ id: schema.songs.id })
-                  .from(schema.songs)
-                  .where(eq(schema.songs.uri, item.uri))
-                  .limit(1)
-              )[0];
-            const songValues = {
-              title,
-              uri: item.uri,
-              size: item.size,
-              duration,
-              trackNumber,
-              releaseId,
-              musicBrainzRecordingId,
-              musicBrainzTrackId,
-            };
-
-            if (existingSong) {
-              await db
-                .update(schema.songs)
-                .set(songValues)
-                .where(eq(schema.songs.id, existingSong.id));
-            } else {
-              const id = randomUUID();
-              await db.insert(schema.songs).values({ id, ...songValues });
-              if (__DEV__) console.info('[MusicLibrary] Created song', {
-                id,
-                title,
-                releaseId,
-                musicBrainzRecordingId,
-                musicBrainzTrackId,
-              });
-            }
+            reportSong(await indexAudioFile(db, item));
           } catch (error) {
             console.warn(`Could not index music file ${item.uri}:`, error);
           }
+          flusher.request();
         }
       }
 
       if (isCancelled()) return [];
 
-      for (const location of savedLocations) {
-        if (isCancelled()) return [];
-        try {
-          await visit(new Directory(location.uri));
-        } catch (error) {
-          console.warn(`Could not scan music folder ${location.uri}:`, error);
+      try {
+        for (const location of savedLocations) {
+          if (isCancelled()) return [];
+          setScanningAction('scan');
+          setScanningLocationUri(location.uri);
+          setScanningSongTitle(null);
+          if (__DEV__)
+            console.info('[MusicLibrary] Scanning folder', {
+              source,
+              uri: location.uri,
+            });
+          try {
+            await visit(new Directory(location.uri));
+          } catch (error) {
+            console.warn(`Could not scan music folder ${location.uri}:`, error);
+          }
+        }
+      } finally {
+        // A superseded scan must not clear the folder the newer scan announced.
+        if (!isCancelled()) {
+          setScanningLocationUri(null);
+          setScanningSongTitle(null);
+          setScanningAction('scan');
         }
       }
 
       if (isCancelled()) return [];
-      return loadLibraryFromDatabase(source);
+      // Drain the last incremental reload so it cannot land after the final snapshot.
+      await flusher.drain();
+      if (isCancelled()) return [];
+      return loadLibraryFromDatabase(source, () => !isCancelled());
     },
-    [db, findOrCreateArtists, findOrCreateRelease, loadLibraryFromDatabase],
+    [db, loadLibraryFromDatabase, reportSong],
   );
 
   const refresh = useCallback(
     async (source = 'refresh') => {
-      setIsLoading(true);
+      const revisionAtStart = locationRevision.current;
+      setIsScanning(true);
       try {
         const loaded = await loadMusicLocations();
-        if (__DEV__) console.info('[MusicLibrary] Read saved music locations', {
-          source,
-          locationCount: loaded.length,
-        });
-        setLocations(loaded);
+        if (__DEV__)
+          console.info('[MusicLibrary] Read saved music locations', {
+            source,
+            locationCount: loaded.length,
+          });
+        if (revisionAtStart === locationRevision.current) setLocations(loaded);
         await loadLibraryFromDatabase(`${source}-cached`);
-        await scanLocations(loaded, source);
+        if (revisionAtStart === locationRevision.current) {
+          await scanLocations(loaded, source);
+        }
         return loaded;
       } finally {
-        setIsLoading(false);
+        setIsScanning(false);
       }
     },
     [loadLibraryFromDatabase, scanLocations],
@@ -597,20 +260,148 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
 
   const addLocation = useCallback(
     async (location: MusicLocation) => {
-      const updated = await addMusicLocation(location);
-      setLocations(updated);
-      await scanLocations(updated, 'folder-added');
-      return updated;
+      locationRevision.current += 1;
+      setIsScanning(true);
+      try {
+        const updated = await addMusicLocation(location);
+        setLocations(updated);
+        await scanLocations(updated, 'folder-added');
+        return updated;
+      } finally {
+        setIsScanning(false);
+      }
     },
     [scanLocations],
   );
 
+  // Inverse of scanLocations: deletes in batches and publishes state between
+  // them, so the library shrinks progressively instead of all at once.
+  const purgeSongs = useCallback(
+    async (locationUri: string | null, source: string): Promise<Song[]> => {
+      const generation = ++scanGeneration.current;
+      const isCancelled = () => generation !== scanGeneration.current;
+      const flusher = createProgressFlusher(() =>
+        loadLibraryFromDatabase(source, () => !isCancelled()),
+      );
+
+      // Capture the playing track before its rows are deleted, so the player can
+      // keep showing it until playback moves on.
+      const playingUri = audioEngine.getSnapshot().currentUri;
+      const playingSong = playingUri
+        ? songsRef.current.find(song => song.uri === playingUri)
+        : undefined;
+      if (playingSong) {
+        const artistNames = artistsRef.current
+          .filter(artist => playingSong.artistIds.includes(artist.id))
+          .map(artist => artist.name)
+          .filter(Boolean);
+        const release =
+          releasesRef.current.find(
+            release => release.id === playingSong.releaseId,
+          ) ?? null;
+        removedSongRef.current = playingSong;
+        setRemovedNowPlaying({
+          title: playingSong.title,
+          artist: artistNames.join(', ') || 'Unknown Artist',
+          album: release?.title ?? null,
+          artworkUri: release?.artworkUri ?? null,
+        });
+      }
+
+      setScanningAction('remove');
+      setScanningLocationUri(locationUri);
+      setScanningSongTitle(null);
+
+      try {
+        if (locationUri) {
+          let uris: string[] | null = null;
+          try {
+            uris = collectAudioUris(new Directory(locationUri));
+          } catch (error) {
+            console.warn(
+              `Could not list ${locationUri} before removal:`,
+              error,
+            );
+          }
+
+          if (uris) {
+            for (let i = 0; i < uris.length; i += PURGE_BATCH_SIZE) {
+              if (isCancelled()) return [];
+              const removed = await deleteSongsByUris(
+                db,
+                uris.slice(i, i + PURGE_BATCH_SIZE),
+              );
+              const lastTitle = removed[removed.length - 1];
+              if (lastTitle) reportSong(lastTitle);
+              await purgeOrphanedRows(db);
+              flusher.request();
+            }
+          } else {
+            // Folder unreadable, so fall back to the URI prefix recorded at scan time.
+            const prefix = locationUri.endsWith('/')
+              ? locationUri
+              : `${locationUri}/`;
+            await deleteSongsByUriPrefix(db, prefix);
+            await purgeOrphanedRows(db);
+            flusher.request();
+          }
+        } else {
+          while (!isCancelled()) {
+            const removed = await deleteSongsBatch(db, PURGE_BATCH_SIZE);
+            if (removed.length === 0) break;
+            const lastTitle = removed[removed.length - 1];
+            if (lastTitle) reportSong(lastTitle);
+            await purgeOrphanedRows(db);
+            flusher.request();
+          }
+        }
+      } finally {
+        // A superseded purge must not clear the folder the newer job announced.
+        if (!isCancelled()) {
+          setScanningLocationUri(null);
+          setScanningSongTitle(null);
+          setScanningAction('scan');
+        }
+      }
+
+      if (isCancelled()) return [];
+      await flusher.drain();
+      if (isCancelled()) return [];
+      return loadLibraryFromDatabase(source, () => !isCancelled());
+    },
+    [db, loadLibraryFromDatabase, reportSong],
+  );
+
   const removeAllMusicLocations = useCallback(async () => {
-    await storage.removeItem(STORAGE_KEYS.musicLocations);
-    setLocations([]);
-    await scanLocations([], 'locations-cleared');
-    return [];
-  }, [scanLocations]);
+    locationRevision.current += 1;
+    setIsScanning(true);
+    try {
+      await storage.removeItem(STORAGE_KEYS.musicLocations);
+      setLocations([]);
+      await purgeSongs(null, 'locations-cleared');
+      return [];
+    } finally {
+      setIsScanning(false);
+    }
+  }, [purgeSongs]);
+
+  const removeLocation = useCallback(
+    async (location: MusicLocation) => {
+      locationRevision.current += 1;
+      setIsScanning(true);
+      try {
+        // Purge before forgetting the folder: an interrupted removal then leaves the
+        // folder saved, so the next scan rebuilds its rows instead of orphaning them.
+        await purgeSongs(location.uri, 'folder-removed');
+        const remaining = await removeMusicLocation(location);
+        setLocations(remaining);
+        return remaining;
+      } finally {
+        setIsScanning(false);
+      }
+    },
+    [purgeSongs],
+  );
 
   const scanSavedLocations = useCallback(
     () => scanLocations(locations, 'manual-rescan'),
@@ -632,9 +423,14 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
       songs,
       artists,
       releases,
-      isLoading,
+      removedNowPlaying,
+      isScanning,
+      scanningLocationUri,
+      scanningSongTitle,
+      scanningAction,
       addLocation,
       removeAllMusicLocations,
+      removeLocation,
       refresh,
       scanSavedLocations,
       releaseById,
@@ -645,9 +441,14 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
       songs,
       artists,
       releases,
-      isLoading,
+      removedNowPlaying,
+      isScanning,
+      scanningLocationUri,
+      scanningSongTitle,
+      scanningAction,
       addLocation,
       removeAllMusicLocations,
+      removeLocation,
       refresh,
       scanSavedLocations,
       releaseById,

@@ -1,7 +1,7 @@
-import { Directory, File, Paths } from "expo-file-system";
-import { STORAGE_KEYS, storage } from "@/lib/storage";
+import { Directory, File, Paths } from 'expo-file-system';
+import { STORAGE_KEYS, storage } from '@/lib/storage';
 
-const CACHE_DIRECTORY = "zestmusic-audio";
+const CACHE_DIRECTORY = 'zestmusic-audio';
 /** Total bytes the cache may occupy before eviction starts. */
 const CACHE_BUDGET_BYTES = 2 * 1024 ** 3;
 /** Entries not used for this long are deleted. */
@@ -13,6 +13,10 @@ const CACHE_TARGET_RATIO = 0.8;
 const RECENTLY_WRITTEN_MS = 60_000;
 /** Debounce index writes; a lost write is recovered by reconciliation. */
 const INDEX_WRITE_DELAY_MS = 1_000;
+/** Suffix for in-progress copies; excluded from lookups and from the index. */
+export const PARTIAL_SUFFIX = '.part';
+/** A partial file older than this cannot belong to a live copy and is removed. */
+const STALE_PARTIAL_MS = 60 * 60 * 1_000;
 
 interface CacheEntry {
   size: number;
@@ -31,13 +35,13 @@ export function getCacheDirectory(): Directory {
 }
 
 function sanitizeIndex(value: unknown): CacheIndex {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return {};
   }
 
   const result: CacheIndex = {};
   for (const [name, entry] of Object.entries(value)) {
-    if (!entry || typeof entry !== "object") continue;
+    if (!entry || typeof entry !== 'object') continue;
 
     const { size, lastAccess } = entry as Partial<CacheEntry>;
     if (Number.isFinite(size) && Number.isFinite(lastAccess)) {
@@ -56,7 +60,7 @@ async function loadIndex(): Promise<CacheIndex> {
         const raw = await storage.getItem(STORAGE_KEYS.audioCacheIndex);
         loaded = sanitizeIndex(raw ? JSON.parse(raw) : null);
       } catch (error) {
-        console.warn("[AudioCache] Could not read cache index", error);
+        console.warn('[AudioCache] Could not read cache index', error);
         loaded = {};
       }
 
@@ -73,7 +77,7 @@ async function persistIndex() {
   try {
     await storage.setItem(STORAGE_KEYS.audioCacheIndex, JSON.stringify(index));
   } catch (error) {
-    console.warn("[AudioCache] Could not write cache index", error);
+    console.warn('[AudioCache] Could not write cache index', error);
   }
 }
 
@@ -93,7 +97,7 @@ export async function touchCacheEntry(file: File): Promise<void> {
     current[file.name] = { size: file.size, lastAccess: Date.now() };
     scheduleIndexWrite();
   } catch (error) {
-    console.warn("[AudioCache] Could not update cache index", error);
+    console.warn('[AudioCache] Could not update cache index', error);
   }
 }
 
@@ -115,7 +119,7 @@ function deleteFile(
     files.delete(name);
     return size;
   } catch (error) {
-    console.warn("[AudioCache] Could not delete cached file", { name, error });
+    console.warn('[AudioCache] Could not delete cached file', { name, error });
     return 0;
   }
 }
@@ -133,9 +137,28 @@ async function runMaintenance(pinnedName?: string) {
       return;
     }
 
+    const now = Date.now();
     const files = new Map<string, File>();
     for (const entry of directory.list()) {
-      if (entry instanceof File) files.set(entry.name, entry);
+      if (!(entry instanceof File)) continue;
+
+      if (entry.name.endsWith(PARTIAL_SUFFIX)) {
+        // A fresh .part may still be copying; only drop ones with a known, old mtime.
+        const lastModified = entry.lastModified;
+        if (lastModified != null && now - lastModified >= STALE_PARTIAL_MS) {
+          try {
+            entry.delete();
+          } catch (error) {
+            console.warn('[AudioCache] Could not delete partial file', {
+              name: entry.name,
+              error,
+            });
+          }
+        }
+        continue;
+      }
+
+      files.set(entry.name, entry);
     }
 
     // Reconcile: drop entries whose file vanished, adopt files with no entry.
@@ -143,14 +166,16 @@ async function runMaintenance(pinnedName?: string) {
       if (!files.has(name)) delete current[name];
     }
 
-    const now = Date.now();
     let total = 0;
     for (const [name, file] of files) {
       const entry = current[name];
       if (entry) {
         entry.size = file.size;
       } else {
-        current[name] = { size: file.size, lastAccess: file.lastModified ?? now };
+        current[name] = {
+          size: file.size,
+          lastAccess: file.lastModified ?? now,
+        };
       }
       total += file.size;
     }
@@ -184,7 +209,7 @@ async function runMaintenance(pinnedName?: string) {
 
     await persistIndex();
   } catch (error) {
-    console.warn("[AudioCache] Cache maintenance failed", error);
+    console.warn('[AudioCache] Cache maintenance failed', error);
   }
 }
 

@@ -37,12 +37,24 @@
         }
       ],
       "expo-sqlite",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "backgroundColor": "#F9F9F9",
+          "dark": {
+            "image": "./assets/splash-icon.png",
+            "backgroundColor": "#141414"
+          }
+        }
+      ],
+      "expo-image"
     ],
     "scheme": "zestmusic",
     "experiments": {
       "typedRoutes": true
     },
-    "backgroundColor": "#F7F9FA"
+    "backgroundColor": "#F9F9F9"
   }
 }

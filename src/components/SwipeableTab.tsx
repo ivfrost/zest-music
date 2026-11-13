@@ -1,14 +1,8 @@
-import { router, usePathname, type Href } from 'expo-router';
+import { type Href, router, usePathname } from 'expo-router';
 import { type PropsWithChildren, useMemo, useRef } from 'react';
 import { PanResponder, View } from 'react-native';
 
-const TAB_ROUTES: Href[] = [
-  '/artists',
-  '/songs',
-  '/albums',
-  '/playlists',
-  '/tests',
-];
+const TAB_ROUTES: Href[] = ['/', '/songs', '/albums', '/playlists', '/tests'];
 const MIN_HORIZONTAL_DISTANCE = 16;
 const SWIPE_THRESHOLD = 60;
 

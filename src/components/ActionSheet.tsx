@@ -12,6 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TabBarContext } from '@/context/TabBarContext';
 import { useMaterialTheme } from '@/hooks/useMaterialTheme';
+import { spacing } from '@/theme';
 
 /** The native bar drops instantly, so the sheet waits a beat to read as a sequence. */
 const TAB_BAR_DELAY_MS = 120;
@@ -40,7 +41,7 @@ export function ActionSheet({
   onSelect,
   onCancel,
 }: ActionSheetProps) {
-  const { colors, rippleColor } = useMaterialTheme();
+  const { rippleColor } = useMaterialTheme();
   const insets = useSafeAreaInsets();
   const { setIsTabBarHidden } = useContext(TabBarContext);
   const [isMounted, setIsMounted] = useState(false);
@@ -145,7 +146,7 @@ export function ActionSheet({
         <Animated.View
           onLayout={event => setTravel(event.nativeEvent.layout.height)}
           style={{
-            paddingBottom: insets.bottom + 12,
+            paddingBottom: insets.bottom + spacing.md,
             transform: [
               {
                 translateY: progress.interpolate({
@@ -157,12 +158,12 @@ export function ActionSheet({
           }}
           className="px-3"
         >
-          <View className="overflow-hidden rounded-3xl bg-surface-container-low">
+          <View className="overflow-hidden rounded-md3-xl bg-surface-container-low">
             {title || message ? (
               <View className="bg-surface-container px-5 pb-4 pt-5">
                 {title ? (
                   <Text
-                    className="text-base font-medium text-on-surface"
+                    className="text-body-large font-medium text-on-surface"
                     numberOfLines={1}
                   >
                     {title}
@@ -170,7 +171,7 @@ export function ActionSheet({
                 ) : null}
                 {message ? (
                   <Text
-                    className="mt-1 text-sm text-on-surface-variant opacity-70"
+                    className="mt-1 text-body-medium text-on-surface-variant opacity-70"
                     numberOfLines={1}
                   >
                     {message}
@@ -189,7 +190,7 @@ export function ActionSheet({
                 unstable_pressDelay={0}
                 className="h-14 justify-center px-5"
               >
-                <Text className="text-base text-on-surface">{option}</Text>
+                <Text className="text-body-large text-on-surface">{option}</Text>
               </Pressable>
             ))}
           </View>

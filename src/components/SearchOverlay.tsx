@@ -47,8 +47,12 @@ export function SearchOverlay({ initialScope, onClose }: SearchOverlayProps) {
     useMusicLocations();
   const { playTrack } = useAudio();
   const currentRoute = usePathname();
-  const { colors, vars: themeVars, rippleColor, dividerColor } =
-    useMaterialTheme();
+  const {
+    colors,
+    vars: themeVars,
+    rippleColor,
+    dividerColor,
+  } = useMaterialTheme();
   const renderSeparator = useRowSeparator(dividerColor, 88);
   const [query, setQuery] = useState('');
   const [scope, setScope] = useState<SearchScope>(initialScope);
@@ -93,16 +97,21 @@ export function SearchOverlay({ initialScope, onClose }: SearchOverlayProps) {
       visible
       animationType="slide"
       onRequestClose={onClose}
-      onShow={() => searchInputRef.current?.focus()}
+      onShow={() => {
+        setTimeout(() => searchInputRef.current?.focus(), 100);
+      }}
     >
       <View style={[themeVars, { flex: 1 }]}>
-        <SafeAreaView edges={['top', 'bottom']} className="flex-1 bg-background">
+        <SafeAreaView
+          edges={['top', 'bottom']}
+          className="flex-1 bg-background"
+        >
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             className="flex-1"
           >
             <View className="flex-row items-center gap-2 px-4 py-3">
-              <View className="flex-1 flex-row items-center gap-2 rounded-full bg-surface-container px-4 py-2">
+              <View className="flex-1 flex-row items-center gap-2 rounded-md3-full bg-surface-container px-4 py-2">
                 <SymbolView
                   name={{
                     ios: 'magnifyingglass',
@@ -114,13 +123,13 @@ export function SearchOverlay({ initialScope, onClose }: SearchOverlayProps) {
                 />
                 <TextInput
                   ref={searchInputRef}
-                  autoFocus
+                  showSoftInputOnFocus
                   value={query}
                   onChangeText={setQuery}
                   placeholder="Search your library"
                   placeholderTextColor={colors.onSurfaceVariant}
                   returnKeyType="search"
-                  className="flex-1 text-base text-on-surface"
+                  className="flex-1 text-body-large text-on-surface"
                 />
                 {query ? (
                   <Pressable
@@ -141,7 +150,7 @@ export function SearchOverlay({ initialScope, onClose }: SearchOverlayProps) {
                   </Pressable>
                 ) : null}
               </View>
-              <View className="overflow-hidden rounded-full">
+              <View className="overflow-hidden rounded-md3-full">
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="Close search"
@@ -163,7 +172,10 @@ export function SearchOverlay({ initialScope, onClose }: SearchOverlayProps) {
               {SCOPES.map(option => {
                 const selected = scope === option.value;
                 return (
-                  <View key={option.value} className="flex-1 overflow-hidden rounded-full">
+                  <View
+                    key={option.value}
+                    className="flex-1 overflow-hidden rounded-md3-full"
+                  >
                     <Pressable
                       accessibilityRole="tab"
                       accessibilityState={{ selected }}
@@ -173,7 +185,7 @@ export function SearchOverlay({ initialScope, onClose }: SearchOverlayProps) {
                     >
                       <Text
                         numberOfLines={1}
-                        className={`text-sm font-medium ${
+                        className={`text-body-medium font-medium ${
                           selected
                             ? 'text-on-primary-container'
                             : 'text-on-surface-variant'
@@ -194,6 +206,87 @@ export function SearchOverlay({ initialScope, onClose }: SearchOverlayProps) {
                 keyboardShouldPersistTaps="handled"
                 contentContainerClassName="py-2"
                 ItemSeparatorComponent={renderSeparator}
+                ListHeaderComponent={
+                  songResults.length > 0 ? (
+                    <View className="flex-row items-center py-1 pl-4 pr-1">
+                      <Text className="flex-1 text-body-medium text-on-surface-variant">
+                        {songResults.length} songs
+                      </Text>
+                      <View className="overflow-hidden rounded-md3-full">
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`Shuffle all, ${songResults.length} songs`}
+                          onPress={() => {
+                            const firstSong = songResults[0];
+                            if (!firstSong) return;
+                            closeAnd(() => {
+                              void playTrack(
+                                firstSong.uri,
+                                {
+                                  currentRoute,
+                                  queue: createQueueFromSongList(
+                                    songResults,
+                                    firstSong.uri,
+                                  ),
+                                },
+                                { shuffle: true },
+                              );
+                            });
+                          }}
+                          android_ripple={{
+                            color: rippleColor,
+                            borderless: true,
+                          }}
+                          className="h-12 w-12 items-center justify-center"
+                        >
+                          <SymbolView
+                            name={{
+                              ios: 'shuffle',
+                              android: 'shuffle',
+                              web: 'shuffle',
+                            }}
+                            size={20}
+                            tintColor={colors.onSurfaceVariant}
+                          />
+                        </Pressable>
+                      </View>
+                      <View className="overflow-hidden rounded-md3-full">
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`Play all, ${songResults.length} songs`}
+                          onPress={() => {
+                            const firstSong = songResults[0];
+                            if (!firstSong) return;
+                            closeAnd(() => {
+                              void playTrack(firstSong.uri, {
+                                currentRoute,
+                                queue: createQueueFromSongList(
+                                  songResults,
+                                  firstSong.uri,
+                                ),
+                              });
+                            });
+                          }}
+                          android_ripple={{
+                            color: rippleColor,
+                            borderless: true,
+                          }}
+                          className="h-12 w-12 items-center justify-center"
+                        >
+                          <SymbolView
+                            name={{
+                              ios: 'play.fill',
+                              android: 'play_arrow',
+                              web: 'play_arrow',
+                            }}
+                            size={24}
+                            tintColor={colors.onSurfaceVariant}
+                          />
+                        </Pressable>
+                      </View>
+                    </View>
+                  ) : undefined
+                }
                 ListEmptyComponent={
                   <Text className="p-6 text-center text-on-surface-variant">
                     {emptyMessage}
@@ -280,7 +373,11 @@ export function SearchOverlay({ initialScope, onClose }: SearchOverlayProps) {
                   <Row
                     title={release.title}
                     artworkUri={release.artworkUri}
-                    icon={{ ios: 'square.stack', android: 'album', web: 'album' }}
+                    icon={{
+                      ios: 'square.stack',
+                      android: 'album',
+                      web: 'album',
+                    }}
                     iconColor={colors.onSurfaceVariant}
                     rippleColor={rippleColor}
                     showChevron

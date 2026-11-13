@@ -1,9 +1,9 @@
+import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SymbolView } from 'expo-symbols';
 import { useMemo, useRef, useState } from 'react';
 import {
-  Image,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Pressable,
@@ -14,7 +14,6 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AlbumRow } from '@/components/AlbumRow';
 import { useArtistImages } from '@/hooks/useArtistImages';
-import { useAudio } from '@/hooks/useAudio';
 import { useMaterialTheme } from '@/hooks/useMaterialTheme';
 import useMusicLocations from '@/hooks/useMusicLocation';
 import { usePreferences } from '@/hooks/usePreferences';
@@ -31,7 +30,6 @@ export default function ArtistDetailScreen() {
   const { artists, songs, releaseById } = useMusicLocations();
   const { vars: themeVars, colors } = useMaterialTheme();
   const { preferences } = usePreferences();
-  const { currentUri } = useAudio();
   const insets = useSafeAreaInsets();
   const artist = artists.find(candidate => candidate.id === id);
 
@@ -106,7 +104,7 @@ export default function ArtistDetailScreen() {
       <ScrollView
         className="flex-1"
         contentContainerStyle={{
-          paddingBottom: currentUri ? MINI_PLAYER_CLEARANCE : 24,
+          paddingBottom: MINI_PLAYER_CLEARANCE,
         }}
         onScroll={handleScroll}
         scrollEventThrottle={16}
@@ -135,17 +133,18 @@ export default function ArtistDetailScreen() {
             <Image
               accessible={false}
               source={imageSource(imageUri)}
-              className="h-full w-full"
-              resizeMode="cover"
+              style={{ width: '100%', height: '100%' }}
+              contentFit="cover"
+              cachePolicy="memory-disk"
             />
           ) : null}
         </View>
 
         <View className="px-4 pt-4">
-          <Text className="text-2xl font-medium text-on-surface">
+          <Text className="text-headline-small font-medium text-on-surface">
             {artist?.name ?? 'Unknown artist'}
           </Text>
-          <Text className="mt-1 text-sm text-on-surface-variant opacity-70">
+          <Text className="mt-1 text-body-medium text-on-surface-variant opacity-70">
             {albums.length === 1 ? '1 album' : `${albums.length} albums`}
           </Text>
         </View>
@@ -181,7 +180,7 @@ export default function ArtistDetailScreen() {
           left: 16,
           zIndex: 10,
         }}
-        className="overflow-hidden rounded-full"
+        className="overflow-hidden rounded-md3-full"
       >
         <Pressable
           accessibilityRole="button"

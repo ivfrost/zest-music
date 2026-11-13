@@ -1,0 +1,103 @@
+diff --git a/node_modules/react-native-audio-api/android/src/main/cpp/audioapi/android/AndroidDecoding.cpp b/node_modules/react-native-audio-api/android/src/main/cpp/audioapi/android/AndroidDecoding.cpp
+index d7ecf4d..129ef66 100644
+--- a/node_modules/react-native-audio-api/android/src/main/cpp/audioapi/android/AndroidDecoding.cpp
++++ b/node_modules/react-native-audio-api/android/src/main/cpp/audioapi/android/AndroidDecoding.cpp
+@@ -22,6 +22,7 @@
+ #include <cerrno>
+ #include <cmath>
+ #include <condition_variable>
++#include <cstdlib>
+ #include <cstdint>
+ #include <cstdio>
+ #include <cstring>
+@@ -36,6 +37,23 @@
+ namespace audioapi::android::decoder {
+ namespace {
+ 
++constexpr const char *PROC_FD_PREFIX = "/proc/self/fd/";
++
++// SAF grants access to the open descriptor, not to a path that can be reopened
++// through it. Reopening /proc/self/fd/<fd> can fail path-based access checks.
++int openSourceDescriptor(const std::string &filePath) {
++  if (filePath.rfind(PROC_FD_PREFIX, 0) == 0) {
++    const char *fdText = filePath.c_str() + std::strlen(PROC_FD_PREFIX);
++    char *end = nullptr;
++    const long parsedFd = std::strtol(fdText, &end, 10);
++    if (end != fdText && *end == '\0' && parsedFd >= 0) {
++      return ::dup(static_cast<int>(parsedFd));
++    }
++  }
++
++  return ::open(filePath.c_str(), O_RDONLY | O_CLOEXEC);
++}
++
+ // Codec output PCM encodings (android.media.AudioFormat constants).
+ constexpr int ENCODING_PCM_16 = 2;
+ constexpr int ENCODING_PCM_8 = 3;
+@@ -773,7 +791,7 @@ decoding::DecoderResult AndroidDecoder::open(const decoding::LocalFileSource &so
+   // some devices ("NdkMediaExtractor: can't create http service", status
+   // -10002). Local files must use the fd overload.
+   const std::string filePath = path::normalizeFilePath(source.path);
+-  const int fd = ::open(filePath.c_str(), O_RDONLY | O_CLOEXEC);
++  const int fd = openSourceDescriptor(filePath);
+   if (fd < 0) {
+     return Err(
+         "AndroidDecoder::open: failed to open '" + source.path + "': " + std::strerror(errno));
+diff --git a/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/notification/PlaybackNotification.kt b/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/notification/PlaybackNotification.kt
+index 6a91c42..075ba8b 100644
+--- a/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/notification/PlaybackNotification.kt
++++ b/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/notification/PlaybackNotification.kt
+@@ -131,6 +131,12 @@ class PlaybackNotification(
+         }
+ 
+         override fun onSeekTo(pos: Long) {
++          // Update the session position before crossing the JS bridge so the
++          // notification slider does not wait for the JS event round-trip.
++          reactContext.get()?.runOnNativeModulesQueueThread {
++            elapsedTime = pos
++            updatePlaybackState(playbackStateVal)
++          }
+           val body = HashMap<String, Any>().apply { put("value", pos / 1000.0) }
+           audioAPIModule.get()?.invokeHandlerWithEventNameAndEventBody(AudioEvent.PLAYBACK_NOTIFICATION_SEEK_TO.ordinal, body)
+         }
+diff --git a/node_modules/react-native-audio-api/lib/commonjs/Audio/useAudioSourceLoader.js b/node_modules/react-native-audio-api/lib/commonjs/Audio/useAudioSourceLoader.js
+index 2c624eb..c60fe19 100644
+--- a/node_modules/react-native-audio-api/lib/commonjs/Audio/useAudioSourceLoader.js
++++ b/node_modules/react-native-audio-api/lib/commonjs/Audio/useAudioSourceLoader.js
+@@ -85,7 +85,6 @@ function useAudioSourceLoader({
+       loop,
+       onEnded: () => {
+         onEndedRef.current(nextDuration);
+-        spawnFileSource();
+       }
+     });
+     fileSource.setVolume(initialVolume);
+diff --git a/node_modules/react-native-audio-api/lib/module/Audio/useAudioSourceLoader.js b/node_modules/react-native-audio-api/lib/module/Audio/useAudioSourceLoader.js
+index bb38f65..5d1bc2f 100644
+--- a/node_modules/react-native-audio-api/lib/module/Audio/useAudioSourceLoader.js
++++ b/node_modules/react-native-audio-api/lib/module/Audio/useAudioSourceLoader.js
+@@ -81,7 +81,6 @@ export function useAudioSourceLoader({
+       loop,
+       onEnded: () => {
+         onEndedRef.current(nextDuration);
+-        spawnFileSource();
+       }
+     });
+     fileSource.setVolume(initialVolume);
+diff --git a/node_modules/react-native-audio-api/src/Audio/useAudioSourceLoader.ts b/node_modules/react-native-audio-api/src/Audio/useAudioSourceLoader.ts
+index 2c7e81c..dca6618 100644
+--- a/node_modules/react-native-audio-api/src/Audio/useAudioSourceLoader.ts
++++ b/node_modules/react-native-audio-api/src/Audio/useAudioSourceLoader.ts
+@@ -126,9 +126,11 @@ export function useAudioSourceLoader({
+     const fileSource = new AudioFileSourceNode(context, node);
+     const { duration: nextDuration } = fileSource.attach({
+       loop,
++      // Do not respawn the same source on end: consumers that advance to a new
++      // source would otherwise pay for an extra open/decode of the finished file.
++      // Replay mounts a fresh Audio element after the ended node is disabled.
+       onEnded: () => {
+         onEndedRef.current(nextDuration);
+-        spawnFileSource();
+       },
+     });
+ 
