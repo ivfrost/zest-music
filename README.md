@@ -138,18 +138,23 @@ npx expo start -c    # after adding routes or changing tailwind classes
 - Playlists cannot be renamed from the UI yet
 - Playlist order is insertion order; there is no reordering
 - The equalizer graph is wired but flat
+- Rescans re-read unchanged files, and indexing writes one row per song instead of batching
+- Album artwork is fetched per release without deduplication, and list rows render full-size covers
+  instead of thumbnails
 
 ## Roadmap
 
 - Playlist editing: rename playlists and drag to reorder their songs
-- Hold and restore queues from a “Saved Queues” menu. Held queues are removed after all their songs
-  have played, with manual removal available.
-- Show lyrics on the expanded player and allow them to pop out into a draggable floating window.
-- Add a left-handed layout preference that moves action buttons toward the bottom-left.
-- Export playback statistics in an analysis-friendly format for Python, NumPy, pandas and Matplotlib.
-- Stream music from a user-selected cloud provider, such as Google Drive.
-- Resume an interrupted scan instead of restarting the folder from the beginning.
-- Add haptic feedback when entering granular seek mode and at other appropriate interactions.
+- Add a whole album or playlist to a playlist instead of adding songs one at a time
+- Add an add-to-playlist action to the full player's top-right controls
+- Insights: a top-right menu item listing rarely played albums and songs
+- Show lyrics on the expanded player, with a poppable floating window
+- Normalise and group genre tags without a recommendation engine
+- Add a left-handed layout preference that moves action buttons toward the bottom-left
+- Add haptic feedback when entering granular seek mode and at other appropriate interactions
+- Export playback statistics in an analysis-friendly format for pandas
+- Stream music from a user-selected cloud provider, such as Google Drive
+- Skip unchanged files on rescan and resume an interrupted scan instead of restarting the folder
 
 ## Licence
 
