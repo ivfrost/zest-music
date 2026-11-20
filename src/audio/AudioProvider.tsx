@@ -68,6 +68,12 @@ interface AudioReactContextValue {
   togglePlayback: () => Promise<void>;
   pause: () => void;
   stopAndClearQueue: () => void;
+  /** Appends a track after everything still queued. */
+  queueEnqueue: (uri: string, currentRoute?: string) => void;
+  /** Inserts a track directly after the current one. */
+  queuePlayNext: (uri: string, currentRoute?: string) => void;
+  /** Inserts a track after the current one and starts it immediately. */
+  queuePlayNow: (uri: string, currentRoute?: string) => void;
 }
 
 /** Playback position, split out so its cadence does not re-render every consumer. */
@@ -506,7 +512,9 @@ export function AudioProvider({ children }: PropsWithChildren) {
       try {
         if (currentUri === firstUri) {
           if (!isPlaying) {
-            await audioEngine.play();
+            // A row tap means "play this song", not "resume the restored
+            // position"; the player controls still resume where it left off.
+            await audioEngine.startOver();
             return;
           }
 
@@ -563,6 +571,71 @@ export function AudioProvider({ children }: PropsWithChildren) {
           error,
         });
       }
+    },
+    [commitQueue, prefetchUpcoming],
+  );
+
+  /**
+   * Adds a track to the active queue without interrupting playback. `next`
+   * lands directly after the current track, `end` after everything queued.
+   * A track already occupying that slot is left alone instead of duplicated.
+   * `queue` and `order` are spliced together: restore requires them to be
+   * permutations of one another, and un-shuffling rebuilds `order` from
+   * `queue`.
+   */
+  const insertIntoQueue = useCallback(
+    (uri: string, position: 'next' | 'end', currentRoute = '') => {
+      const activeQueue = playbackQueue.current;
+
+      if (!activeQueue) {
+        // Nothing is playing, so there is nothing to insert after: start it.
+        commitQueue({
+          currentRoute,
+          queue: [uri],
+          order: [uri],
+          currentIndex: 0,
+          repeatMode: 'off',
+          isShuffling: false,
+          hasRepeatedCurrentTrack: false,
+        });
+        void audioEngine.load(uri).catch(error => {
+          console.error('[Audio] Failed to play inserted track', { uri, error });
+        });
+        return;
+      }
+
+      if (position === 'end') {
+        // The track is already the tail of the play order.
+        if (activeQueue.order[activeQueue.order.length - 1] === uri) return;
+
+        commitQueue({
+          ...activeQueue,
+          queue: [...activeQueue.queue, uri],
+          order: [...activeQueue.order, uri],
+        });
+        prefetchUpcoming();
+        return;
+      }
+
+      // "Next" is the slot after the currently playing track in the play
+      // order. Both arrays get it there: insertion does not depend on shuffle.
+      const at = activeQueue.currentIndex + 1;
+      // Already queued next; Play Now still starts it from the caller.
+      if (activeQueue.order[at] === uri) return;
+
+      const order = [
+        ...activeQueue.order.slice(0, at),
+        uri,
+        ...activeQueue.order.slice(at),
+      ];
+      const queue = [
+        ...activeQueue.queue.slice(0, at),
+        uri,
+        ...activeQueue.queue.slice(at),
+      ];
+
+      commitQueue({ ...activeQueue, queue, order });
+      prefetchUpcoming();
     },
     [commitQueue, prefetchUpcoming],
   );
@@ -651,6 +724,32 @@ export function AudioProvider({ children }: PropsWithChildren) {
     audioEngine.pause();
   }, []);
 
+  const queueEnqueue = useCallback(
+    (uri: string, currentRoute = '') => {
+      insertIntoQueue(uri, 'end', currentRoute);
+    },
+    [insertIntoQueue],
+  );
+
+  const queuePlayNext = useCallback(
+    (uri: string, currentRoute = '') => {
+      insertIntoQueue(uri, 'next', currentRoute);
+    },
+    [insertIntoQueue],
+  );
+
+  const queuePlayNow = useCallback(
+    (uri: string, currentRoute = '') => {
+      const activeQueue = playbackQueue.current;
+      insertIntoQueue(uri, 'next', currentRoute);
+      // With no active queue, insertIntoQueue already started the track.
+      if (activeQueue) {
+        void playQueueTrackAt(activeQueue.currentIndex + 1);
+      }
+    },
+    [insertIntoQueue, playQueueTrackAt],
+  );
+
   const stopAndClearQueue = useCallback(() => {
     prefetchGeneration.current += 1;
     lastSavedPosition.current = { uri: null, seconds: 0, at: 0 };
@@ -674,6 +773,9 @@ export function AudioProvider({ children }: PropsWithChildren) {
       queueUris,
       queueIndex,
       playQueueTrackAt,
+      queueEnqueue,
+      queuePlayNext,
+      queuePlayNow,
       isShuffling,
       repeatMode,
       toggleShuffle,
@@ -694,6 +796,9 @@ export function AudioProvider({ children }: PropsWithChildren) {
       queueUris,
       queueIndex,
       playQueueTrackAt,
+      queueEnqueue,
+      queuePlayNext,
+      queuePlayNow,
       isShuffling,
       repeatMode,
       toggleShuffle,

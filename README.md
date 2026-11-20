@@ -1,14 +1,13 @@
 # Zest Music
 
-A local-first music player for Android. It scans the folders you grant it, keeps the library in
-SQLite, and plays the files through `react-native-audio-api` with background playback and a system
-media notification.
+A local-first music player for Android. It scans granted folders, keeps the library in SQLite, and
+plays the files through `react-native-audio-api` with background playback and a system media
+notification.
 
-I started Zest Music inspired by Vanilla Music. I wanted a more modern, native-feeling Android
-interface and to smooth out personal workflow nitpicks: choosing what happens when tapping the
-currently playing song, making controls easier to reach one-handed (especially for left-handed use),
-and playing a different song without losing the current queue, etc. These are only examples; the
-roadmap below is still an unconsolidated working list of ideas.
+Zest Music is inspired by Vanilla Music. It targets a native Android interface and covers workflow
+details such as the action for tapping the currently playing song, one-handed controls (including
+left-handed use), and playing another song without losing the current queue. The roadmap lists
+planned work.
 
 Audio files and the SQLite database stay on-device; no account is required. When an artist has
 no MusicBrainz ID, artwork lookup sends its name to MusicBrainz to find one, then uses the ID with
@@ -29,15 +28,19 @@ for fallback lookup.
   Android native decoder support.
 - Artists, Albums and Songs tabs with an All / Recent / Most played dropdown driven by persisted
   play counts
+- Song long-press menu: add to a playlist, enqueue, play next, or play now
+- Playlists tab: create a playlist, add songs from the song long-press menu, open one to play it,
+  remove songs by long-pressing them, and long-press a playlist to delete it
 - Tapping an album anywhere filters the Songs tab behind a dismissible chip
 - Artist page with an edge-to-edge hero image, album carousel and library counts
 - Search overlay opened from the mini player, with an Artists / Songs / Albums switch that starts on
   the current tab
 - Full player: cover, play/pause, previous/next, shuffle, repeat one/all, seek bar with long-press
-  fine scrubbing, and an up-next sheet
+  fine scrubbing, an up-next sheet, and tappable artist and album links
 - Mini player with search, play/pause and expand: an upward swipe grows it into the full player,
   which closes only on a downward swipe
-- Background playback with a media notification (play/pause, next/previous, scrubber)
+- Background playback with a media notification (play/pause, next/previous, scrubber); playback
+  pauses when the last wired, USB or Bluetooth output disappears
 - Settings: what tapping the current song does, artist image source, music folders
 - Material 3 palette in light and dark, following the system setting
 
@@ -49,16 +52,19 @@ for fallback lookup.
 - `expo-sqlite` with Drizzle ORM; migrations applied at boot
 - `react-native-audio-api` for playback, a JSI module, so the app needs a dev build
 - `music-metadata` and `strtok3` for tags, `expo-image` for artwork, `zod` for persisted shapes
-- Application id `io.github.ivfrost.zestmusic`
 
 ## Playback
 
 Selecting a song passes its URI from the screen to `AudioProvider` and the singleton `audioEngine`.
 An Android SAF `content://` URI is opened as a file descriptor by the `saf-file-descriptor` module
-and played from `/proc/self/fd/<fd>`. The engine probes that descriptor before use; providers that
-withhold descriptor access fall back to copying the file into the app cache once, so playback never
-fails on them. `StreamingAudio` then mounts the `Audio` component from `react-native-audio-api` with
-the resulting source and the shared `AudioContext`.
+and played from `/proc/self/fd/<fd>`. `StreamingAudio` then mounts the `Audio` component from
+`react-native-audio-api` with the resulting source and the shared `AudioContext`.
+
+The native file source only accepts filesystem paths, so the engine probes the descriptor before
+use and reads from it when it is playable. Providers that cannot expose a playable descriptor fall
+back to one full copy into the app cache. Before descriptor playback, every `content://` URI was
+copied into the cache before it played: the first tap on a track waited for a full copy, and each
+played track briefly existed twice on disk.
 
 The signal path is:
 
@@ -72,16 +78,26 @@ The native module decodes and plays the file. The filter is currently neutral, s
 change the sound; it is in the graph to support a future equalizer. Queue, shuffle order, repeat
 mode and position persist so playback can be restored after a restart.
 
+Audio focus is requested when a track starts and released when playback stops or errors. A route
+change or a dead native output stream is recovered by resuming the `AudioContext`. Losing the last
+external output pauses playback; connecting a device leaves playback running and routes the stream
+to the new device.
+
 ## Data
 
-- Tables: `artists`, `releases`, `songs`, `playlists`. Songs carry duration, track number, play
-  count and last played at.
-- Metadata editing is intentionally out of scope; use MusicBrainz Picard to edit tags before
-  scanning. Zest Music reads embedded MusicBrainz IDs, falls back to tag names, and does not modify
-  files. Missing values use `Unknown Artist` / `Unknown Album`.
+- Tables: `artists`, `releases`, `songs`, `playlists` and the `song_playlists` join table. Songs
+  carry duration, track number, play count and last played at.
+- Playlists are many-to-many through `song_playlists`. Adding a song is idempotent — the composite
+  primary key drops the duplicate and the UI reports “Already in …” instead of reordering. The app
+  enables `PRAGMA foreign_keys = ON` on its connection so deleting a song or playlist removes its
+  associations; SQLite leaves foreign keys off by default, which is why `purgeOrphanedRows` still
+  deletes releases and artists by hand.
 - Inserts go through `src/db/library.ts`, which upserts artists and releases by MusicBrainz ID.
-- Play statistics are written once per actual playback and read through a small module store, so the
-  UI never waits on the database for ranking.
+- Scanning is split by responsibility: the folder walk (`musicScan`), metadata and row building
+  (`musicIndexer`) and upserts (`db/library`) are separate, and `MusicLocationContext` only
+  publishes scan state.
+- Play statistics are written once per actual playback and read through a small module store;
+  ranking does not query the database.
 
 ## Structure
 
@@ -89,13 +105,13 @@ mode and position persist so playback can be restored after a restart.
 | -------------------- | ------------------------------------------------------------------------ |
 | `modules/`           | `saf-file-descriptor`: Kotlin + TS module that opens SAF URIs as fds     |
 | `patches/`           | `react-native-audio-api` patch so descriptor paths decode                |
-| `src/app/`           | Expo Router routes: tabs, artist stack, settings                         |
+| `src/app/`           | Expo Router routes: tabs, artist and playlist stacks, settings           |
 | `src/audio/`         | engine with descriptor and cache sources, provider, queue, notifications |
 | `src/babel-plugins/` | Hermes compatibility transform for `file-type`                           |
-| `src/components/`    | list rows, players, filter dropdown, tab menu, search, action sheet      |
+| `src/components/`    | list rows, players, playlist picker and dialogs, snackbar, filter dropdown, tab menu, search, action sheet |
 | `src/context/`       | library scan state and tab bar state                                     |
-| `src/db/`            | Drizzle schema, select schemas and library upserts                       |
-| `src/hooks/`         | theme, preferences, artist images, audio and library accessors           |
+| `src/db/`            | Drizzle schema, select schemas, library upserts and playlist helpers     |
+| `src/hooks/`         | theme, preferences, artist images, audio, library and playlist accessors |
 | `src/lib/`           | scan/index helpers, saved locations, stats, artist images, layout        |
 | `src/theme/`         | MD3 tokens for spacing, type and radius, mapped into tailwind            |
 | `src/types/`         | zod schemas and shared types                                             |
@@ -111,24 +127,25 @@ npx expo run:android
 npx expo start -c    # after adding routes or changing tailwind classes
 ```
 
+## Scope
+
+- Tag editing is out of scope; tags are prepared externally with MusicBrainz Picard before scanning.
+- The scanner reads embedded MusicBrainz IDs, falls back to tag names and never modifies files.
+- Missing metadata displays as `Unknown Artist` / `Unknown Album`.
+
 ## Known gaps
 
-- The Playlists tab is a stub; nothing writes to the playlist tables yet
-- The song long-press menu lists actions that are not implemented yet
+- Playlists cannot be renamed from the UI yet
+- Playlist order is insertion order; there is no reordering
 - The equalizer graph is wired but flat
 
 ## Roadmap
 
-- Implement the song long-press actions already shown in the Songs tab: “Add to playlist”, “Enqueue”,
-  “Play Next (preserve queue)” and “Play Now (preserve queue)”. The preserve-queue plan is to save the
-  active queue and current song, play the selected song, then restore the saved queue and song. An
-  alternative is to put queues on hold and restore them from a “Saved Queues” option in the top-right
-  menu. Held queues should be removed after all their songs have played, with manual removal available.
-- Implement playlist management with a clear duplicate policy: deduplicate on insert, or remove an
-  existing copy and reinsert it at the bottom.
+- Playlist editing: rename playlists and drag to reorder their songs
+- Hold and restore queues from a “Saved Queues” menu. Held queues are removed after all their songs
+  have played, with manual removal available.
 - Show lyrics on the expanded player and allow them to pop out into a draggable floating window.
-- Add a left-handed layout preference that moves action buttons toward the bottom-left for easier
-  one-handed use.
+- Add a left-handed layout preference that moves action buttons toward the bottom-left.
 - Export playback statistics in an analysis-friendly format for Python, NumPy, pandas and Matplotlib.
 - Stream music from a user-selected cloud provider, such as Google Drive.
 - Resume an interrupted scan instead of restarting the folder from the beginning.

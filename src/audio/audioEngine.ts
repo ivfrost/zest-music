@@ -1,7 +1,10 @@
 import * as Crypto from 'expo-crypto';
 import { type Directory, File } from 'expo-file-system';
+import { Platform } from 'react-native';
 import {
   AudioContext,
+  AudioManager,
+  type AudioDeviceList,
   type AudioTagHandle,
   getAudioDuration,
   type MediaElementAudioSourceNode,
@@ -16,6 +19,9 @@ import {
   PARTIAL_SUFFIX,
   touchCacheEntry,
 } from './audioCache';
+
+/** Output categories that are the phone itself; everything else is external. */
+const BUILT_IN_OUTPUTS = new Set(['Built-in Speaker', 'Built-in Earpiece']);
 
 interface PlaybackState {
   /** The library URI (often a SAF content:// URI) shown in the UI. */
@@ -77,6 +83,12 @@ class AudioEngine {
    * When it cannot, copies remain the only playable source.
    */
   private fdSourceStatus: 'unknown' | 'usable' | 'unusable' = 'unknown';
+  /** In-flight output restart, shared by every recovery trigger. */
+  private outputRestart: Promise<void> | null = null;
+  /** Outputs other than the phone's own speaker/earpiece, by device id. */
+  private externalOutputs = new Set<string>();
+  /** Serializes device snapshots so overlapping route events compare cleanly. */
+  private deviceRefresh: Promise<void> = Promise.resolve();
 
   constructor() {
     this.eq = this.audioContext.createBiquadFilter();
@@ -85,6 +97,110 @@ class AudioEngine {
     this.eq.Q.value = 1;
     this.eq.gain.value = 0;
     this.eq.connect(this.audioContext.destination);
+
+    // The native output driver stops rendering when its AAudio stream dies
+    // (device removal, USB DAC suspend, OS mutation of the stream) and reports
+    // it here. No `Audio` event fires for this, so without a resume the graph
+    // stays silent while the UI keeps showing playback.
+    this.audioContext.onerror = () => {
+      console.warn('[Audio] Output stream failed, restarting');
+      void this.restartOutput();
+    };
+
+    // Route changes (headphones, USB DACs, speaker handoff) can also leave the
+    // driver stopped. Resuming is a no-op while it is healthy.
+    AudioManager.addSystemEventListener('routeChange', event => {
+      if (__DEV__) console.info('[Audio] Output route changed', event.reason);
+      void this.restartOutput();
+      this.trackOutputDevices(event.reason);
+    });
+
+    void this.trackOutputDevices();
+  }
+
+  /**
+   * Pauses when the last external output disappears: unplugging headphones
+   * must not keep playing through the phone speaker. Plugging a device in
+   * never interrupts playback — the native stream follows the new route.
+   */
+  private trackOutputDevices(reason?: string) {
+    this.deviceRefresh = this.deviceRefresh
+      .then(async () => {
+        let outputs: AudioDeviceList;
+        try {
+          outputs = (await AudioManager.getDevicesInfo()).availableOutputs;
+        } catch (error) {
+          if (__DEV__) {
+            console.warn('[Audio] Could not read output devices', error);
+          }
+          return;
+        }
+
+        if (Platform.OS === 'ios') {
+          // AVAudioSession reports losing the active route as this reason.
+          if (reason === 'OldDeviceUnavailable' && this.state.isPlaying) {
+            console.info('[Audio] Output route lost, pausing');
+            this.releaseOutputFocus();
+            this.pause();
+          }
+          return;
+        }
+
+        const external = new Set(
+          outputs
+            .filter(output => !BUILT_IN_OUTPUTS.has(output.category))
+            .map(output => output.id),
+        );
+        const lostLastExternal =
+          this.externalOutputs.size > 0 && external.size === 0;
+        this.externalOutputs = external;
+
+        if (lostLastExternal && this.state.isPlaying) {
+          console.info('[Audio] External output disconnected, pausing');
+          this.releaseOutputFocus();
+          this.pause();
+        }
+      })
+      .catch(error => {
+        console.warn('[Audio] Could not update output devices', error);
+      });
+  }
+
+  /** Reopens the native output stream after a driver failure or route change. */
+  private async restartOutput(): Promise<void> {
+    if (this.outputRestart) return this.outputRestart;
+
+    this.outputRestart = this.audioContext
+      .resume()
+      .catch(error => {
+        console.error('[Audio] Could not restart audio output', error);
+      })
+      .finally(() => {
+        this.outputRestart = null;
+      });
+
+    return this.outputRestart;
+  }
+
+  /**
+   * Audio focus is requested when playback starts rather than once at launch.
+   * A request made at launch is revoked by whichever app plays next, and the
+   * engine never re-requests it, leaving playback without focus.
+   */
+  private requestOutputFocus() {
+    try {
+      AudioManager.observeAudioInterruptions('gain');
+    } catch (error) {
+      console.warn('[Audio] Could not request audio focus', error);
+    }
+  }
+
+  private releaseOutputFocus() {
+    try {
+      AudioManager.observeAudioInterruptions(false);
+    } catch (error) {
+      console.warn('[Audio] Could not release audio focus', error);
+    }
   }
 
   getSnapshot = (): PlaybackState => this.state;
@@ -248,6 +364,7 @@ class AudioEngine {
 
     if (this.autoplayOnLoad) {
       this.update({ isPlaying: true, isLoading: false });
+      this.requestOutputFocus();
       handle.play();
     } else {
       this.update({ isPlaying: false, isLoading: false });
@@ -279,6 +396,7 @@ class AudioEngine {
 
   handleError = (error: Error) => {
     console.error('[Audio] Playback error', error);
+    this.releaseOutputFocus();
     this.update({ isPlaying: false, isLoading: false });
   };
 
@@ -294,6 +412,7 @@ class AudioEngine {
       return;
     }
 
+    this.requestOutputFocus();
     this.handle.play();
     this.update({ isPlaying: true });
   }
@@ -306,6 +425,7 @@ class AudioEngine {
   stop() {
     this.loadId += 1;
     this.playReported = false;
+    this.releaseOutputFocus();
     this.handle?.pause();
     this.handle?.seekToTime(0);
     this.releaseSource();
@@ -331,8 +451,20 @@ class AudioEngine {
 
   async startOver() {
     this.endedNaturally = false;
-    this.handle?.seekToTime(0);
-    this.handle?.play();
+    this.pendingStartAt = 0;
+    this.requestOutputFocus();
+
+    if (!this.handle) {
+      // Still preparing the source: start from zero once it loads.
+      if (this.state.isLoading) {
+        this.autoplayOnLoad = true;
+        this.update({ isPlaying: true, currentTime: 0 });
+      }
+      return;
+    }
+
+    this.handle.seekToTime(0);
+    this.handle.play();
     this.update({ isPlaying: true, currentTime: 0 });
   }
 

@@ -71,7 +71,8 @@ export function PlaybackNotificationSync() {
 
   useEffect(() => {
     void AudioManager.requestNotificationPermissions().catch(() => {});
-    AudioManager.observeAudioInterruptions('gain');
+    // Audio focus is requested by the engine when playback starts; a launch-time
+    // request is revoked by whichever app plays next and never re-requested.
     AudioManager.setSystemOptions({
       ios: { category: 'playback', mode: 'default' },
     });
@@ -83,6 +84,11 @@ export function PlaybackNotificationSync() {
     const interruption = AudioManager.addSystemEventListener(
       'interruption',
       event => {
+        if (__DEV__) {
+          console.info('[Playback] Audio interruption', event.type, {
+            shouldResume: event.shouldResume,
+          });
+        }
         if (event.type === 'began') {
           wasPlayingBeforeInterruption.current = isPlayingRef.current;
           if (isPlayingRef.current) void togglePlaybackRef.current();

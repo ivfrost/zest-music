@@ -4,6 +4,7 @@ import { useDrizzleStudio } from 'expo-drizzle-studio-plugin';
 import { Stack } from 'expo-router';
 import {
   openDatabaseSync,
+  type SQLiteDatabase,
   SQLiteProvider,
   useSQLiteContext,
 } from 'expo-sqlite';
@@ -22,6 +23,15 @@ import { useMaterialTheme } from '@/hooks/useMaterialTheme';
 import { spacing } from '@/theme';
 
 const DB_NAME = 'zestmusic';
+
+/**
+ * SQLite keeps foreign keys disabled on every new connection, so the schema's
+ * ON DELETE CASCADE clauses are inert until this runs. It must be set per
+ * connection; the migration connection does not use it.
+ */
+async function enableForeignKeys(db: SQLiteDatabase) {
+  await db.execAsync('PRAGMA foreign_keys = ON');
+}
 
 function DrizzleStudioBridge() {
   useDrizzleStudio(useSQLiteContext());
@@ -94,6 +104,7 @@ export default function RootLayout() {
           <SQLiteProvider
             databaseName={DB_NAME}
             options={{ enableChangeListener: true }}
+            onInit={enableForeignKeys}
             useSuspense
           >
             {__DEV__ && <DrizzleStudioBridge />}

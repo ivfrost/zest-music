@@ -60,6 +60,8 @@ type FullPlayerProps = {
   title: string;
   artist: string;
   artistLinks: readonly PlayerArtist[];
+  /** `id` is null when the playing file is no longer in the library. */
+  album: { id: string | null; title: string } | null;
   artworkUri: string | null;
   trackKey: string | null;
   artworkSize: number;
@@ -75,6 +77,7 @@ type FullPlayerProps = {
   onNext: () => void | Promise<void>;
   onSeek: (seconds: number) => void;
   onOpenArtist: (artistId: string) => void;
+  onOpenAlbum: (releaseId: string) => void;
   queueTracks: QueueTrack[];
   onSelectQueueTrack: (index: number) => void;
   colors: MaterialColors;
@@ -355,6 +358,7 @@ export function FullPlayer({
   title,
   artist,
   artistLinks,
+  album,
   artworkUri,
   trackKey,
   artworkSize,
@@ -370,6 +374,7 @@ export function FullPlayer({
   onNext,
   onSeek,
   onOpenArtist,
+  onOpenAlbum,
   queueTracks,
   onSelectQueueTrack,
   colors,
@@ -737,9 +742,9 @@ export function FullPlayer({
           >
             {title}
           </Text>
-          {artistLinks.length > 0 ? (
-            <View className="mt-1 flex-row flex-wrap items-center">
-              {artistLinks.map((linkedArtist, index) => (
+          <View className="mt-1 flex-row flex-wrap items-center">
+            {artistLinks.length > 0 ? (
+              artistLinks.map((linkedArtist, index) => (
                 <Fragment key={linkedArtist.id}>
                   {index > 0 ? (
                     <Text className="text-title-medium text-on-surface-variant">
@@ -759,16 +764,45 @@ export function FullPlayer({
                     </Text>
                   </Pressable>
                 </Fragment>
-              ))}
-            </View>
-          ) : (
-            <Text
-              className="mt-1 text-title-medium text-on-surface-variant"
-              numberOfLines={1}
-            >
-              {artist}
-            </Text>
-          )}
+              ))
+            ) : (
+              <Text
+                className="text-title-medium text-on-surface-variant"
+                numberOfLines={1}
+              >
+                {artist}
+              </Text>
+            )}
+
+            {album ? (
+              <>
+                <Text className="text-title-medium text-on-surface-variant">
+                  {' · '}
+                </Text>
+                {album.id ? (
+                  <Pressable
+                    accessibilityRole="link"
+                    accessibilityLabel={`Open album ${album.title}`}
+                    onPress={() => onOpenAlbum(album.id as string)}
+                  >
+                    <Text
+                      className="text-title-medium text-on-surface-variant"
+                      numberOfLines={1}
+                    >
+                      {album.title}
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <Text
+                    className="text-title-medium text-on-surface-variant"
+                    numberOfLines={1}
+                  >
+                    {album.title}
+                  </Text>
+                )}
+              </>
+            ) : null}
+          </View>
         </View>
 
         <View className="mt-8 w-full flex-row items-center">

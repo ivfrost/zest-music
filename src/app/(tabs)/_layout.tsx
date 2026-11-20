@@ -26,6 +26,7 @@ import { TabBarContext } from '@/context/TabBarContext';
 import { useAudio } from '@/hooks/useAudio';
 import { useMaterialTheme } from '@/hooks/useMaterialTheme';
 import useMusicLocations from '@/hooks/useMusicLocation';
+import { setAlbumFilter } from '@/lib/albumFilter';
 import { radius } from '@/theme';
 import {
   MINI_PLAYER_GAP,
@@ -82,6 +83,21 @@ export default function TabsLayout() {
       return name ? [{ id: artistId, name }] : [];
     });
   }, [currentSong, artistNameById, removedNowPlaying]);
+  const playingAlbum = useMemo(() => {
+    if (removedNowPlaying) {
+      // Same rule as the song rows: a self-titled single shows no album.
+      return removedNowPlaying.album &&
+        removedNowPlaying.album !== removedNowPlaying.title
+        ? { id: null, title: removedNowPlaying.album }
+        : null;
+    }
+    if (!currentSong) return null;
+
+    const release = releaseById.get(currentSong.releaseId);
+    return release && release.title !== currentSong.title
+      ? { id: release.id, title: release.title }
+      : null;
+  }, [currentSong, releaseById, removedNowPlaying]);
   const playingArtworkUri = removedNowPlaying?.artworkUri ?? currentArtworkUri;
   const hasTrack = Boolean(currentUri || removedNowPlaying);
   const queueTracks = useMemo(() => {
@@ -113,6 +129,16 @@ export default function TabsLayout() {
         if (finished) scheduleOnRN(setIsPlayerExpanded, false);
       });
       router.push({ pathname: '/artists/[id]', params: { id: artistId } });
+    },
+    [expandedProgress],
+  );
+  const openAlbum = useCallback(
+    (releaseId: string) => {
+      expandedProgress.value = withTiming(0, { duration: 220 }, finished => {
+        if (finished) scheduleOnRN(setIsPlayerExpanded, false);
+      });
+      setAlbumFilter(releaseId);
+      router.navigate('/songs');
     },
     [expandedProgress],
   );
@@ -353,6 +379,7 @@ export default function TabsLayout() {
               title={playingTitle}
               artist={playingArtist}
               artistLinks={playingArtistLinks}
+              album={playingAlbum}
               artworkUri={playingArtworkUri}
               trackKey={currentUri}
               artworkSize={Math.min(windowWidth - 64, layoutHeight * 0.44)}
@@ -368,6 +395,7 @@ export default function TabsLayout() {
               onNext={() => void playNext()}
               onSeek={seekTo}
               onOpenArtist={openArtist}
+              onOpenAlbum={openAlbum}
               queueTracks={queueTracks}
               onSelectQueueTrack={index => {
                 void playQueueTrackAt(index);

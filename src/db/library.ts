@@ -131,6 +131,95 @@ export async function findOrCreateArtists(
 }
 
 /**
+ * Returns the id of the playlist with this title, creating it when absent.
+ * The title is the playlist's identity here, so asking for an existing one
+ * returns it rather than creating a duplicate.
+ */
+export async function createPlaylist(
+  db: LibraryDatabase,
+  title: string,
+): Promise<string> {
+  const existing = (await db.select({
+    id: schema.playlists.id,
+  }).from(schema.playlists).where(eq(schema.playlists.title, title)).limit(1))[0];
+  if (existing) return existing.id;
+
+  const id = randomUUID();
+  await db.insert(schema.playlists).values({ id, title });
+  if (__DEV__)
+    console.info('[MusicLibrary] Created playlist', {
+      id,
+      title
+    });
+  return id;
+}
+
+/**
+ * Associates a song with a playlist. Re-adding is a no-op: the join table's
+ * composite primary key makes the insert idempotent, so no existence check is
+ * needed.
+ *
+ * @returns `true` when the association was inserted, `false` when the song was
+ * already in the playlist.
+ */
+export async function addSongToPlaylist(
+  db: LibraryDatabase,
+  songId: string,
+  playlistId: string,
+): Promise<boolean> {
+  const inserted = await db
+    .insert(schema.songPlaylists)
+    .values({ songId, playlistId })
+    .onConflictDoNothing()
+    .returning({ songId: schema.songPlaylists.songId });
+
+  return inserted.length > 0;
+}
+
+/**
+ * Deletes a playlist. Its `song_playlists` rows are removed by the schema's
+ * ON DELETE CASCADE, which is active because the app enables
+ * `PRAGMA foreign_keys` on its connection.
+ *
+ * @returns `true` when a playlist was deleted, `false` when the id is unknown.
+ */
+export async function deletePlaylist(
+  db: LibraryDatabase,
+  playlistId: string,
+): Promise<boolean> {
+  const deleted = await db
+    .delete(schema.playlists)
+    .where(eq(schema.playlists.id, playlistId))
+    .returning({ id: schema.playlists.id });
+
+  return deleted.length > 0;
+}
+
+/**
+ * Removes a song from a playlist. The song itself stays in the library, and
+ * playback is unaffected: the active queue is independent of the playlist.
+ *
+ * @returns `true` when the association was removed, `false` when it was absent.
+ */
+export async function removeSongFromPlaylist(
+  db: LibraryDatabase,
+  songId: string,
+  playlistId: string,
+): Promise<boolean> {
+  const removed = await db
+    .delete(schema.songPlaylists)
+    .where(
+      and(
+        eq(schema.songPlaylists.songId, songId),
+        eq(schema.songPlaylists.playlistId, playlistId),
+      ),
+    )
+    .returning({ songId: schema.songPlaylists.songId });
+
+  return removed.length > 0;
+}
+
+/**
  * Reads the whole library snapshot. Callers own publishing it to React state, so a
  * superseded scan can discard the result without touching the UI.
  */

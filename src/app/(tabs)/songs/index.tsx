@@ -16,7 +16,9 @@ import {
 } from '@/audio/trackHelpers';
 import { ActionSheet } from '@/components/ActionSheet';
 import { FilterDropdown } from '@/components/FilterDropdown';
+import { PlaylistPicker } from '@/components/PlaylistPicker';
 import { useRowSeparator } from '@/components/RowSeparator';
+import { Snackbar, type SnackbarMessage } from '@/components/Snackbar';
 import { SongRow } from '@/components/SongRow';
 import { TabMenuButton } from '@/components/TabMenuButton';
 import { TabScreen } from '@/components/TabScreen';
@@ -24,9 +26,8 @@ import { useAudio } from '@/hooks/useAudio';
 import { useMaterialTheme } from '@/hooks/useMaterialTheme';
 import useMusicLocations from '@/hooks/useMusicLocation';
 import { setAlbumFilter, useAlbumFilter } from '@/lib/albumFilter';
-import { spacing } from '@/theme';
-
 import { usePlayStats } from '@/lib/playStats';
+import { spacing } from '@/theme';
 import type { Song } from '@/types/songs';
 
 /** Caps ranked modes so they stay a selection instead of the whole library. */
@@ -46,8 +47,8 @@ const MODE_OPTIONS = MODES.map(option => MODE_LABELS[option]);
 const SONG_ACTIONS = [
   'Add to playlist',
   'Enqueue',
-  'Play Next (preserve queue)',
-  'Play Now (preserve queue)',
+  'Play Next',
+  'Play Now',
 ];
 
 export default function SongsTab() {
@@ -57,11 +58,21 @@ export default function SongsTab() {
     artistNameById,
     isScanning: isLibraryLoading,
   } = useMusicLocations();
-  const { playTrack, currentUri, isPlaying, isLoading } = useAudio();
+  const {
+    playTrack,
+    currentUri,
+    isPlaying,
+    isLoading,
+    queueEnqueue,
+    queuePlayNext,
+    queuePlayNow,
+  } = useAudio();
   const currentRoute = usePathname();
   const { colors, rippleColor, dividerColor } = useMaterialTheme();
   const renderSeparator = useRowSeparator(dividerColor, 88);
   const [actionSong, setActionSong] = useState<Song | null>(null);
+  const [pickerSong, setPickerSong] = useState<Song | null>(null);
+  const [snackbar, setSnackbar] = useState<SnackbarMessage | null>(null);
   const [mode, setMode] = useState<Mode>('all');
   // Session plays layered over the persisted counters.
   const played = usePlayStats();
@@ -127,6 +138,27 @@ export default function SongsTab() {
         .join(' · '),
     };
   }, [actionSong, artistNameById, releaseById]);
+
+  const handleSongAction = (index: number) => {
+    const song = actionSong;
+    setActionSong(null);
+    if (!song) return;
+
+    switch (SONG_ACTIONS[index]) {
+      case 'Add to playlist':
+        setPickerSong(song);
+        break;
+      case 'Enqueue':
+        queueEnqueue(song.uri, currentRoute);
+        break;
+      case 'Play Next':
+        queuePlayNext(song.uri, currentRoute);
+        break;
+      case 'Play Now':
+        queuePlayNow(song.uri, currentRoute);
+        break;
+    }
+  };
 
   useEffect(() => {
     pendingOffsetRef.current = offsetsRef.current[listKey] ?? 0;
@@ -294,7 +326,7 @@ export default function SongsTab() {
                 getSongDisplayInfo(song, artistNameById);
               const albumTitle =
                 release && release.title !== song.title ? release.title : null;
-              const subtitle = [albumTitle, artistNames || 'Unknown Artist']
+              const subtitle = [artistNames || 'Unknown Artist', albumTitle]
                 .filter(Boolean)
                 .join(' · ');
 
@@ -325,9 +357,17 @@ export default function SongsTab() {
         title={actionSheetInfo?.title}
         message={actionSheetInfo?.message}
         options={SONG_ACTIONS}
-        onSelect={() => setActionSong(null)}
+        onSelect={handleSongAction}
         onCancel={() => setActionSong(null)}
       />
+
+      <PlaylistPicker
+        visible={pickerSong !== null}
+        songId={pickerSong?.id ?? null}
+        onClose={() => setPickerSong(null)}
+        onResult={text => setSnackbar({ id: Date.now(), text })}
+      />
+      <Snackbar message={snackbar} onDismiss={() => setSnackbar(null)} />
     </TabScreen>
   );
 }

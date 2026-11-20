@@ -36,3 +36,28 @@ Write a comment only when the code cannot express the reason itself:
 - Public APIs get a doc comment: what it does, what it returns, what it throws, and any non-obvious precondition.
 - Internal helpers get a doc comment only if the signature doesn't make the contract obvious.
 - Do not duplicate type information that the compiler already enforces.
+
+# Investigation notes
+
+Findings, investigations and decision records live in the Obsidian vault at
+`~/Documents/Obsidian/DevKnowledge/10_Projects/zest-music/notes`. The repository
+exposes that folder as a single symlink at `docs/notes`, so the notes read as part
+of the codebase without being stored inside it: the vault copy survives even if the
+repository is deleted or moved.
+
+## Where a note goes
+
+- One file per investigation: `YYYY-MM-DD-topic.md` in that folder.
+- The file holds the problem, the evidence, the change and what is still open. Update it when the situation changes rather than leaving stale claims; date the update inline when it matters.
+- Add the note to `notes/index.md` (table row plus reading-order entry). Keep every note reachable from the index.
+- Do not put a backlog in a note. Actionable items go to the task tracker; shipped work belongs in the README's "What works today".
+
+## Linking
+
+- `docs/notes` is a symlink to the vault folder. Never replace it with a copy, and never symlink the repository or `docs/` into the vault: Obsidian follows directory symlinks and indexes the whole tree (including `node_modules`), which makes it hang and pin the CPU.
+- Obsidian autosaves what it has open, so an open note can overwrite an edit made outside it. Reopen the note after editing the vault copy.
+
+# Commit messages
+
+- Describe code changes only. README and other documentation-only changes stay out of the body.
+- No `Co-Authored-By` trailer.
