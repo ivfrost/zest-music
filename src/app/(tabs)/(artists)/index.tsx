@@ -12,6 +12,7 @@ import { useMaterialTheme } from '@/hooks/useMaterialTheme';
 import useMusicLocations from '@/hooks/useMusicLocation';
 import { usePreferences } from '@/hooks/usePreferences';
 import { artistImageUrl } from '@/lib/artistImages';
+import { nameCollator } from '@/lib/collator';
 import { usePlayStats } from '@/lib/playStats';
 import { artistImageSource } from '@/lib/preferences';
 import { spacing } from '@/theme';
@@ -71,7 +72,7 @@ export default function ArtistTab() {
         const byPlayedAt =
           (artistPlaybackById.get(b.id)?.lastPlayedAt ?? 0) -
           (artistPlaybackById.get(a.id)?.lastPlayedAt ?? 0);
-        return byPlayedAt || a.name.localeCompare(b.name);
+        return byPlayedAt || nameCollator.compare(a.name, b.name);
       });
     const most = artists
       .filter(artist => (artistPlaybackById.get(artist.id)?.playCount ?? 0) > 0)
@@ -81,7 +82,7 @@ export default function ArtistTab() {
         return (
           (statsB?.playCount ?? 0) - (statsA?.playCount ?? 0) ||
           (statsB?.lastPlayedAt ?? 0) - (statsA?.lastPlayedAt ?? 0) ||
-          a.name.localeCompare(b.name)
+          nameCollator.compare(a.name, b.name)
         );
       });
     return { all: artists, recent, most };

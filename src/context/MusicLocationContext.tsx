@@ -213,6 +213,7 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
       );
 
       const pending: File[] = [];
+      let didChange = false;
       const changed = (file: File) => {
         const entry = indexed.get(file.uri);
         return (
@@ -236,6 +237,7 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
             lastModified: file.lastModified,
           });
         }
+        didChange = true;
         flusher.request();
       }
 
@@ -303,6 +305,7 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
               flusher.request();
             }
             if (missing.length > 0) await purgeOrphanedRows(db);
+            if (missing.length > 0) didChange = true;
           } catch (error) {
             console.warn(`Could not scan music folder ${location.uri}:`, error);
           }
@@ -321,6 +324,8 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
       await flusher.drain();
       if (isCancelled()) return [];
       await pruneArtwork();
+      // The published snapshot is already current when the walk changed nothing.
+      if (!didChange) return songsRef.current;
       return loadLibraryFromDatabase(source, () => !isCancelled());
     },
     [db, loadLibraryFromDatabase, reportSong, retainNowPlaying, pruneArtwork],

@@ -16,6 +16,7 @@ import { TabScreen } from '@/components/TabScreen';
 import { useMaterialTheme } from '@/hooks/useMaterialTheme';
 import useMusicLocations from '@/hooks/useMusicLocation';
 import { setAlbumFilter } from '@/lib/albumFilter';
+import { nameCollator } from '@/lib/collator';
 import { usePlayStats } from '@/lib/playStats';
 import { spacing } from '@/theme';
 import type { ReleaseSummary } from '@/types/releases';
@@ -90,8 +91,8 @@ export default function AlbumsTab() {
 
     const all = [...rows].sort(
       (a, b) =>
-        a.artist.localeCompare(b.artist) ||
-        a.release.title.localeCompare(b.release.title),
+        nameCollator.compare(a.artist, b.artist) ||
+        nameCollator.compare(a.release.title, b.release.title),
     );
     const recent = rows
       .filter(entry => entry.lastPlayedAt > 0)

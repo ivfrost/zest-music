@@ -2,6 +2,7 @@ import { and, eq, inArray, like, notInArray } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/expo-sqlite';
 import { randomUUID } from 'expo-crypto';
 import * as schema from '@/db/schema';
+import { nameCollator } from '@/lib/collator';
 import type { Artist } from '@/types/artists';
 import type { ReleaseSummary, ReleaseType } from '@/types/releases';
 import type { Song } from '@/types/songs';
@@ -325,7 +326,7 @@ export async function readLibrary(
 
   const songs = [...songsById.values()];
   const artists = [...artistsById.values()].sort((a, b) =>
-    a.name.localeCompare(b.name),
+    nameCollator.compare(a.name, b.name),
   );
   if (__DEV__)
     console.info('[MusicLibrary] Read songs and artists from database', {
