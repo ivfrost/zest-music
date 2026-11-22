@@ -25,6 +25,7 @@ export const songs = sqliteTable('songs', {
   title: text('title').notNull(),
   uri: text('uri').notNull(),
   size: integer('size_bytes').notNull(),
+  lastModified: integer('last_modified'),
   duration: integer('duration'),
   playCount: integer('play_count').notNull().default(0),
   lastPlayedAt: integer('last_played_at'),

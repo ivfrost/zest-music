@@ -58,8 +58,8 @@ export function collectAudioUris(
 
 /**
  * Publishes snapshots at most once per `intervalMs` while a long scan or purge
- * runs. `request` never blocks the caller; `drain` waits for the in-flight reload,
- * which is what keeps a trailing snapshot from landing after a final one.
+ * runs. `request` never blocks the caller. `drain` waits for the in-flight reload,
+ * which keeps a trailing snapshot from landing after a final one.
  */
 export function createProgressFlusher<T>(
   reload: () => Promise<T>,
@@ -96,13 +96,17 @@ const COVER_EXTENSIONS: Record<string, string> = {
   'image/bmp': '.bmp',
 };
 
+function coversDirectory(): Directory {
+  return new Directory(Paths.document, 'covers');
+}
+
 /** Writes embedded cover art to the documents directory, keyed by its digest. */
 export async function storeArtwork(
   picture: IPicture | undefined,
 ): Promise<string | null> {
   if (!picture) return null;
 
-  const directory = new Directory(Paths.document, 'covers');
+  const directory = coversDirectory();
   if (!directory.exists) {
     directory.create({ intermediates: true, idempotent: true });
   }
@@ -120,4 +124,23 @@ export async function storeArtwork(
   }
 
   return file.uri;
+}
+
+/**
+ * Deletes cover files no release points at. Covers are content-addressed and only
+ * re-extracted by indexing the audio file, so they are collected by reference
+ * rather than expired by age.
+ */
+export function pruneCoverFiles(referenced: ReadonlySet<string>): void {
+  const directory = coversDirectory();
+  if (!directory.exists) return;
+
+  for (const item of directory.list()) {
+    if (!(item instanceof File) || referenced.has(item.uri)) continue;
+    try {
+      item.delete();
+    } catch {
+      // A failed delete leaves one orphan behind. The next prune retries.
+    }
+  }
 }

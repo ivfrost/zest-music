@@ -16,13 +16,15 @@ for fallback lookup.
 
 ## Screenshots
 
-| ![Songs](assets/screenshots/songs.png) | ![Artist](assets/screenshots/artist.png) | ![Now playing](assets/screenshots/player.png) |
-| :---: | :---: | :---: |
-| **Songs** — mode and album filters, play all | **Artist** — hero, albums, counts | **Now playing** — queue and seek |
+|    ![Songs](assets/screenshots/songs.png)    | ![Artist](assets/screenshots/artist.png) | ![Now playing](assets/screenshots/player.png) |
+| :------------------------------------------: | :--------------------------------------: | :-------------------------------------------: |
+| **Songs** — mode and album filters, play all |    **Artist** — hero, albums, counts     |       **Now playing** — queue and seek        |
 
 ## What works today
 
 - Grant music folders through Android's SAF picker, then scan tags into SQLite
+- Rescans skip files whose size and modification time did not change, and drop songs whose files
+  are gone while keeping the playing track on screen until playback moves on
 - Scanner recognizes AAC, AIFF, APE, ASF, CAF, DSD (DFF/DSF), FLAC, M4A/M4B, MP1/2/3, MP4,
   Musepack (MPC/MPP), Ogg-family (OGA/OGG/Opus/Speex), WAV, WMA and WavPack. Playback depends on
   Android native decoder support.
@@ -101,21 +103,21 @@ to the new device.
 
 ## Structure
 
-| Path                 | Contents                                                                 |
-| -------------------- | ------------------------------------------------------------------------ |
-| `modules/`           | `saf-file-descriptor`: Kotlin + TS module that opens SAF URIs as fds     |
-| `patches/`           | `react-native-audio-api` patch so descriptor paths decode                |
-| `src/app/`           | Expo Router routes: tabs, artist and playlist stacks, settings           |
-| `src/audio/`         | engine with descriptor and cache sources, provider, queue, notifications |
-| `src/babel-plugins/` | Hermes compatibility transform for `file-type`                           |
+| Path                 | Contents                                                                                                   |
+| -------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `modules/`           | `saf-file-descriptor`: Kotlin + TS module that opens SAF URIs as fds                                       |
+| `patches/`           | `react-native-audio-api` patch so descriptor paths decode                                                  |
+| `src/app/`           | Expo Router routes: tabs, artist and playlist stacks, settings                                             |
+| `src/audio/`         | engine with descriptor and cache sources, provider, queue, notifications                                   |
+| `src/babel-plugins/` | Hermes compatibility transform for `file-type`                                                             |
 | `src/components/`    | list rows, players, playlist picker and dialogs, snackbar, filter dropdown, tab menu, search, action sheet |
-| `src/context/`       | library scan state and tab bar state                                     |
-| `src/db/`            | Drizzle schema, select schemas, library upserts and playlist helpers     |
-| `src/hooks/`         | theme, preferences, artist images, audio, library and playlist accessors |
-| `src/lib/`           | scan/index helpers, saved locations, stats, artist images, layout        |
-| `src/theme/`         | MD3 tokens for spacing, type and radius, mapped into tailwind            |
-| `src/types/`         | zod schemas and shared types                                             |
-| `drizzle/`           | generated SQLite migrations                                              |
+| `src/context/`       | library scan state and tab bar state                                                                       |
+| `src/db/`            | Drizzle schema, select schemas, library upserts and playlist helpers                                       |
+| `src/hooks/`         | theme, preferences, artist images, audio, library and playlist accessors                                   |
+| `src/lib/`           | scan/index helpers, saved locations, stats, artist images, layout                                          |
+| `src/theme/`         | MD3 tokens for spacing, type and radius, mapped into tailwind                                              |
+| `src/types/`         | zod schemas and shared types                                                                               |
+| `drizzle/`           | generated SQLite migrations                                                                                |
 
 ## Run locally
 
@@ -138,7 +140,6 @@ npx expo start -c    # after adding routes or changing tailwind classes
 - Playlists cannot be renamed from the UI yet
 - Playlist order is insertion order; there is no reordering
 - The equalizer graph is wired but flat
-- Rescans re-read unchanged files, and indexing writes one row per song instead of batching
 - Album artwork is fetched per release without deduplication, and list rows render full-size covers
   instead of thumbnails
 
@@ -154,7 +155,7 @@ npx expo start -c    # after adding routes or changing tailwind classes
 - Add haptic feedback when entering granular seek mode and at other appropriate interactions
 - Export playback statistics in an analysis-friendly format for pandas
 - Stream music from a user-selected cloud provider, such as Google Drive
-- Skip unchanged files on rescan and resume an interrupted scan instead of restarting the folder
+- Resume an interrupted scan instead of restarting the folder
 
 ## Licence
 

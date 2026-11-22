@@ -21,7 +21,7 @@ import { storeArtwork } from './musicScan';
 /**
  * Reads the tags of one audio file and upserts its release, artists and song rows.
  * Returns the song title so callers can report progress. Throws when the file
- * cannot be parsed or written; callers keep scanning.
+ * cannot be parsed or written. Callers keep scanning.
  */
 export async function indexAudioFile(
   db: LibraryDatabase,
@@ -112,6 +112,7 @@ export async function indexAudioFile(
     title,
     uri: file.uri,
     size: file.size,
+    lastModified: file.lastModified,
     duration,
     trackNumber,
     releaseId,
@@ -138,4 +139,26 @@ export async function indexAudioFile(
       musicBrainzTrackId,
     });
   return title;
+}
+
+/**
+ * Indexes files a batch at a time so SQLite commits and fsyncs once per batch
+ * instead of once per row. One unreadable file does not abort the batch.
+ */
+export async function indexAudioFiles(
+  db: LibraryDatabase,
+  files: readonly File[],
+  report: (title: string) => void,
+): Promise<void> {
+  // Drizzle queries share the expo-sqlite connection, so they run inside this
+  // transaction. Drizzle's own `transaction` type rejects async callbacks.
+  await db.$client.withTransactionAsync(async () => {
+    for (const file of files) {
+      try {
+        report(await indexAudioFile(db, file));
+      } catch (error) {
+        console.warn(`Could not index music file ${file.uri}:`, error);
+      }
+    }
+  });
 }

@@ -44,12 +44,7 @@ const MODE_LABELS: Record<Mode, string> = {
 
 const MODE_OPTIONS = MODES.map(option => MODE_LABELS[option]);
 
-const SONG_ACTIONS = [
-  'Add to playlist',
-  'Enqueue',
-  'Play Next',
-  'Play Now',
-];
+const SONG_ACTIONS = ['Add to playlist', 'Enqueue', 'Play Next', 'Play Now'];
 
 export default function SongsTab() {
   const {
@@ -270,7 +265,7 @@ export default function SongsTab() {
             ItemSeparatorComponent={renderSeparator}
             ListHeaderComponent={
               visibleSongs.length > 0 ? (
-                <View className="flex-row items-center py-1 pl-4 pr-2">
+                <View className="flex-row items-center py-1 pl-5 pr-2">
                   <Text className="flex-1 text-body-medium text-on-surface-variant">
                     {visibleSongs.length} songs
                   </Text>

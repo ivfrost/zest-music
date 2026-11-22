@@ -28,7 +28,7 @@ import {
 } from './playbackSession';
 
 const POSITION_SAVE_INTERVAL_MS = 5_000;
-/** Tracks warmed in each direction; forward matters more, back covers a rewind. */
+/** Tracks warmed in each direction. Forward matters more, and back covers a rewind. */
 const PREFETCH_AHEAD = 3;
 const PREFETCH_BEHIND = 1;
 
@@ -512,8 +512,8 @@ export function AudioProvider({ children }: PropsWithChildren) {
       try {
         if (currentUri === firstUri) {
           if (!isPlaying) {
-            // A row tap means "play this song", not "resume the restored
-            // position"; the player controls still resume where it left off.
+            // A row tap starts this song. The player controls still resume
+            // from the restored position.
             await audioEngine.startOver();
             return;
           }
@@ -577,11 +577,10 @@ export function AudioProvider({ children }: PropsWithChildren) {
 
   /**
    * Adds a track to the active queue without interrupting playback. `next`
-   * lands directly after the current track, `end` after everything queued.
-   * A track already occupying that slot is left alone instead of duplicated.
-   * `queue` and `order` are spliced together: restore requires them to be
-   * permutations of one another, and un-shuffling rebuilds `order` from
-   * `queue`.
+   * lands after the current track. `end` lands after everything queued. A
+   * track already in that slot is not duplicated. `queue` and `order` are
+   * spliced together because restore requires permutations and un-shuffling
+   * rebuilds `order` from `queue`.
    */
   const insertIntoQueue = useCallback(
     (uri: string, position: 'next' | 'end', currentRoute = '') => {
@@ -620,7 +619,7 @@ export function AudioProvider({ children }: PropsWithChildren) {
       // "Next" is the slot after the currently playing track in the play
       // order. Both arrays get it there: insertion does not depend on shuffle.
       const at = activeQueue.currentIndex + 1;
-      // Already queued next; Play Now still starts it from the caller.
+      // Already queued next. Play Now still starts it from the caller.
       if (activeQueue.order[at] === uri) return;
 
       const order = [

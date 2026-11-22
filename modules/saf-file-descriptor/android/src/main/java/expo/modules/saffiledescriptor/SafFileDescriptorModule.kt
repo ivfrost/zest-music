@@ -9,11 +9,11 @@ import expo.modules.kotlin.modules.ModuleDefinition
  * Opens SAF `content://` URIs as file descriptors and exposes them as
  * `/proc/self/fd/<fd>` paths.
  *
- * The audio engine accepts filesystem paths only. A `/proc/self/fd` path is a
- * real path to the already-open file, so playback can read it in place instead
- * of copying the whole track into the app cache first.
+ * The audio engine accepts filesystem paths only. A `/proc/self/fd` path points
+ * at the already-open file. Playback can read it in place, so the app does not
+ * copy the whole track into the cache first.
  *
- * A descriptor must stay open while the track plays; `close` releases it.
+ * A descriptor must stay open while the track plays. `close` releases it.
  */
 class SafFileDescriptorModule : Module() {
   private val handles = mutableMapOf<Int, ParcelFileDescriptor>()

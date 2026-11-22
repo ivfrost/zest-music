@@ -27,7 +27,7 @@ const DB_NAME = 'zestmusic';
 /**
  * SQLite keeps foreign keys disabled on every new connection, so the schema's
  * ON DELETE CASCADE clauses are inert until this runs. It must be set per
- * connection; the migration connection does not use it.
+ * connection. The migration connection does not use it.
  */
 async function enableForeignKeys(db: SQLiteDatabase) {
   await db.execAsync('PRAGMA foreign_keys = ON');

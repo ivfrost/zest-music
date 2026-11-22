@@ -9,11 +9,11 @@ const CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Evict down to this fraction of the budget to avoid constant churn. */
 const CACHE_TARGET_RATIO = 0.8;
-/** Never evict a file written this recently; it may still be copying. */
+/** Never evict a file written this recently. It may still be copying. */
 const RECENTLY_WRITTEN_MS = 60_000;
-/** Debounce index writes; a lost write is recovered by reconciliation. */
+/** Debounce index writes. Reconciliation recovers a lost write. */
 const INDEX_WRITE_DELAY_MS = 1_000;
-/** Suffix for in-progress copies; excluded from lookups and from the index. */
+/** Suffix for in-progress copies. Lookups and the index exclude it. */
 export const PARTIAL_SUFFIX = '.part';
 /** A partial file older than this cannot belong to a live copy and is removed. */
 const STALE_PARTIAL_MS = 60 * 60 * 1_000;
@@ -90,7 +90,7 @@ function scheduleIndexWrite() {
   }, INDEX_WRITE_DELAY_MS);
 }
 
-/** Record that a cached file was just used, so eviction reflects playback. */
+/** Record that a cached file was used, so eviction reflects playback. */
 export async function touchCacheEntry(file: File): Promise<void> {
   try {
     const current = await loadIndex();
@@ -143,7 +143,7 @@ async function runMaintenance(pinnedName?: string) {
       if (!(entry instanceof File)) continue;
 
       if (entry.name.endsWith(PARTIAL_SUFFIX)) {
-        // A fresh .part may still be copying; only drop ones with a known, old mtime.
+        // A fresh .part may still be copying. Only drop ones with a known, old mtime.
         const lastModified = entry.lastModified;
         if (lastModified != null && now - lastModified >= STALE_PARTIAL_MS) {
           try {
@@ -161,7 +161,7 @@ async function runMaintenance(pinnedName?: string) {
       files.set(entry.name, entry);
     }
 
-    // Reconcile: drop entries whose file vanished, adopt files with no entry.
+    // Reconcile: drop entries whose file vanished and add files with no entry.
     for (const name of Object.keys(current)) {
       if (!files.has(name)) delete current[name];
     }
@@ -217,8 +217,8 @@ async function runMaintenance(pinnedName?: string) {
  * Reconcile the index with the cache directory, then delete expired and
  * least-recently-used files until the cache fits its budget.
  *
- * Best-effort and single-flight, so it is safe to call on startup and after
- * a cache write.
+ * The pass is best-effort and single-flight, so it is safe to call on startup
+ * and after a cache write.
  */
 export function maintainAudioCache(
   options: { pinnedName?: string } = {},

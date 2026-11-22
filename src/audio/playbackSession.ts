@@ -68,7 +68,7 @@ export async function clearPlaybackSession(): Promise<void> {
 }
 
 /**
- * `order` must be a permutation of `queue`; otherwise fall back to `queue`
+ * `order` must be a permutation of `queue`. Otherwise, fall back to `queue`
  * and set `fallback` so the caller can clear shuffle.
  */
 export function normalizeOrder(

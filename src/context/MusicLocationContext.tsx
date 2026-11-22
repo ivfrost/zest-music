@@ -1,5 +1,5 @@
 import { drizzle } from 'drizzle-orm/expo-sqlite';
-import { Directory } from 'expo-file-system';
+import { Directory, type File } from 'expo-file-system';
 import { useSQLiteContext } from 'expo-sqlite';
 import {
   createContext,
@@ -16,9 +16,11 @@ import {
   deleteSongsByUriPrefix,
   deleteSongsByUris,
   purgeOrphanedRows,
+  readIndexedFiles,
   readLibrary,
+  readReferencedArtworkUris,
 } from '@/db/library';
-import { indexAudioFile } from '@/lib/musicIndexer';
+import { indexAudioFiles } from '@/lib/musicIndexer';
 import {
   addMusicLocation,
   loadMusicLocations,
@@ -28,6 +30,7 @@ import {
   collectAudioUris,
   createProgressFlusher,
   isAudioFile,
+  pruneCoverFiles,
 } from '@/lib/musicScan';
 import { STORAGE_KEYS, storage } from '@/lib/storage';
 import type { Artist } from '@/types/artists';
@@ -36,6 +39,7 @@ import type { ReleaseSummary } from '@/types/releases';
 import type { Song } from '@/types/songs';
 
 const PURGE_BATCH_SIZE = 200;
+const INDEX_BATCH_SIZE = 25;
 const SONG_REPORT_INTERVAL_MS = 250;
 
 type MusicLocationsContextValue = {
@@ -108,6 +112,42 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
     artworkUri: string | null;
   } | null>(null);
 
+  const pruneArtwork = useCallback(async () => {
+    // A track kept on screen after its rows were deleted keeps its cover too.
+    if (removedSongRef.current) return;
+    pruneCoverFiles(await readReferencedArtworkUris(db));
+  }, [db]);
+
+  // Snapshots the playing track's display data before its rows are deleted.
+  // The player then keeps showing it, artwork included, until playback moves on.
+  const retainNowPlaying = useCallback(
+    (wasRemoved: (song: Song) => boolean) => {
+      const currentUri = audioEngine.getSnapshot().currentUri;
+      if (!currentUri) return;
+      const playingSong = songsRef.current.find(
+        song => song.uri === currentUri,
+      );
+      if (!playingSong || !wasRemoved(playingSong)) return;
+
+      const artistNames = artistsRef.current
+        .filter(artist => playingSong.artistIds.includes(artist.id))
+        .map(artist => artist.name)
+        .filter(Boolean);
+      const release =
+        releasesRef.current.find(
+          release => release.id === playingSong.releaseId,
+        ) ?? null;
+      removedSongRef.current = playingSong;
+      setRemovedNowPlaying({
+        title: playingSong.title,
+        artist: artistNames.join(', ') || 'Unknown Artist',
+        album: release?.title ?? null,
+        artworkUri: release?.artworkUri ?? null,
+      });
+    },
+    [],
+  );
+
   const loadLibraryFromDatabase = useCallback(
     async (source: string, shouldApply?: () => boolean): Promise<Song[]> => {
       const library = await readLibrary(db, source);
@@ -159,31 +199,74 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
     async (
       savedLocations: MusicLocation[],
       source = 'scan',
+      force = false,
     ): Promise<Song[]> => {
       const generation = ++scanGeneration.current;
       const isCancelled = () => generation !== scanGeneration.current;
 
-      // Publishes progress mid-scan; the reload at the end stays authoritative.
+      // Rows indexed before mtime was stored have a null marker. They fall back
+      // to size alone, so an upgrade does not rescan the whole library once.
+      const indexedFiles = await readIndexedFiles(db);
+      const isUnchanged = (file: File) => {
+        if (force) return false;
+        const indexed = indexedFiles.get(file.uri);
+        return (
+          indexed !== undefined &&
+          indexed.size === file.size &&
+          (indexed.lastModified === null ||
+            indexed.lastModified === file.lastModified)
+        );
+      };
+
+      // Publishes progress mid-scan. The reload at the end stays authoritative.
       const flusher = createProgressFlusher(() =>
         loadLibraryFromDatabase(source, () => !isCancelled()),
       );
 
-      async function visit(directory: Directory): Promise<void> {
+      let skipped = 0;
+      let removedCount = 0;
+      let visited = 0;
+      const pending: File[] = [];
+
+      async function flushPending(): Promise<void> {
+        if (pending.length === 0) return;
+        const batch = pending.splice(0, pending.length);
+        await indexAudioFiles(db, batch, reportSong);
+        for (const file of batch) {
+          indexedFiles.set(file.uri, {
+            size: file.size,
+            lastModified: file.lastModified,
+          });
+        }
+        flusher.request();
+      }
+
+      async function visit(
+        directory: Directory,
+        seen: Set<string>,
+      ): Promise<void> {
         if (isCancelled()) return;
         for (const item of directory.list()) {
           if (isCancelled()) return;
           if (item instanceof Directory) {
-            await visit(item);
+            await visit(item, seen);
             continue;
           }
           if (!isAudioFile(item)) continue;
+          seen.add(item.uri);
 
-          try {
-            reportSong(await indexAudioFile(db, item));
-          } catch (error) {
-            console.warn(`Could not index music file ${item.uri}:`, error);
+          // A large SAF folder would otherwise hold the JS thread for the whole walk.
+          if (visited++ % 100 === 0) {
+            await new Promise(resolve => setTimeout(resolve, 0));
           }
-          flusher.request();
+
+          if (isUnchanged(item)) {
+            skipped += 1;
+            continue;
+          }
+
+          pending.push(item);
+          if (pending.length >= INDEX_BATCH_SIZE) await flushPending();
         }
       }
 
@@ -195,16 +278,43 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
           setScanningAction('scan');
           setScanningLocationUri(location.uri);
           setScanningSongTitle(null);
-          if (__DEV__)
-            console.info('[MusicLibrary] Scanning folder', {
-              source,
-              uri: location.uri,
-            });
+          skipped = 0;
+          removedCount = 0;
+
+          // Songs whose rows exist but whose files the walk did not find are gone.
+          // A walk that throws leaves the location's rows untouched.
+          const seen = new Set<string>();
           try {
-            await visit(new Directory(location.uri));
+            await visit(new Directory(location.uri), seen);
+            await flushPending();
+            const prefix = location.uri.endsWith('/')
+              ? location.uri
+              : `${location.uri}/`;
+            const missing = [...indexedFiles.keys()].filter(
+              uri => uri.startsWith(prefix) && !seen.has(uri),
+            );
+            retainNowPlaying(song => missing.includes(song.uri));
+            for (let i = 0; i < missing.length; i += PURGE_BATCH_SIZE) {
+              if (isCancelled()) return [];
+              const batch = missing.slice(i, i + PURGE_BATCH_SIZE);
+              const removed = await deleteSongsByUris(db, batch);
+              const lastTitle = removed[removed.length - 1];
+              if (lastTitle) reportSong(lastTitle);
+              removedCount += removed.length;
+              flusher.request();
+            }
+            if (missing.length > 0) await purgeOrphanedRows(db);
           } catch (error) {
             console.warn(`Could not scan music folder ${location.uri}:`, error);
           }
+
+          if (__DEV__)
+            console.info('[MusicLibrary] Scanned folder', {
+              source,
+              uri: location.uri,
+              skipped,
+              removed: removedCount,
+            });
         }
       } finally {
         // A superseded scan must not clear the folder the newer scan announced.
@@ -219,15 +329,16 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
       // Drain the last incremental reload so it cannot land after the final snapshot.
       await flusher.drain();
       if (isCancelled()) return [];
+      await pruneArtwork();
       return loadLibraryFromDatabase(source, () => !isCancelled());
     },
-    [db, loadLibraryFromDatabase, reportSong],
+    [db, loadLibraryFromDatabase, reportSong, retainNowPlaying, pruneArtwork],
   );
 
   const refresh = useCallback(
-    async (source = 'refresh') => {
+    async (source = 'refresh', scan = true) => {
       const revisionAtStart = locationRevision.current;
-      setIsScanning(true);
+      if (scan) setIsScanning(true);
       try {
         const loaded = await loadMusicLocations();
         if (__DEV__)
@@ -237,7 +348,7 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
           });
         if (revisionAtStart === locationRevision.current) setLocations(loaded);
         await loadLibraryFromDatabase(`${source}-cached`);
-        if (revisionAtStart === locationRevision.current) {
+        if (scan && revisionAtStart === locationRevision.current) {
           await scanLocations(loaded, source);
         }
         return loaded;
@@ -249,14 +360,29 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
   );
 
   useEffect(() => {
-    refresh('app-boot').catch(error =>
-      console.warn('Unable to load music library:', error),
-    );
+    let cancelled = false;
+    refresh('app-boot', false)
+      .then(loaded => {
+        if (cancelled) return;
+        // The cached library is on screen by now. Walk the folders on the next tick
+        // instead of competing with the first render for the JS thread.
+        setTimeout(() => {
+          if (cancelled) return;
+          setIsScanning(true);
+          scanLocations(loaded, 'app-boot')
+            .catch(error =>
+              console.warn('Unable to scan music folders:', error),
+            )
+            .finally(() => setIsScanning(false));
+        }, 0);
+      })
+      .catch(error => console.warn('Unable to load music library:', error));
     return () => {
+      cancelled = true;
       // Stop an in-flight scan before the provider's DB connection closes.
       scanGeneration.current += 1;
     };
-  }, [refresh]);
+  }, [refresh, scanLocations]);
 
   const addLocation = useCallback(
     async (location: MusicLocation) => {
@@ -286,27 +412,7 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
 
       // Capture the playing track before its rows are deleted, so the player can
       // keep showing it until playback moves on.
-      const playingUri = audioEngine.getSnapshot().currentUri;
-      const playingSong = playingUri
-        ? songsRef.current.find(song => song.uri === playingUri)
-        : undefined;
-      if (playingSong) {
-        const artistNames = artistsRef.current
-          .filter(artist => playingSong.artistIds.includes(artist.id))
-          .map(artist => artist.name)
-          .filter(Boolean);
-        const release =
-          releasesRef.current.find(
-            release => release.id === playingSong.releaseId,
-          ) ?? null;
-        removedSongRef.current = playingSong;
-        setRemovedNowPlaying({
-          title: playingSong.title,
-          artist: artistNames.join(', ') || 'Unknown Artist',
-          album: release?.title ?? null,
-          artworkUri: release?.artworkUri ?? null,
-        });
-      }
+      retainNowPlaying(() => true);
 
       setScanningAction('remove');
       setScanningLocationUri(locationUri);
@@ -367,9 +473,10 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
       if (isCancelled()) return [];
       await flusher.drain();
       if (isCancelled()) return [];
+      await pruneArtwork();
       return loadLibraryFromDatabase(source, () => !isCancelled());
     },
-    [db, loadLibraryFromDatabase, reportSong],
+    [db, loadLibraryFromDatabase, reportSong, retainNowPlaying, pruneArtwork],
   );
 
   const removeAllMusicLocations = useCallback(async () => {
@@ -404,7 +511,7 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
   );
 
   const scanSavedLocations = useCallback(
-    () => scanLocations(locations, 'manual-rescan'),
+    () => scanLocations(locations, 'manual-rescan', true),
     [locations, scanLocations],
   );
 

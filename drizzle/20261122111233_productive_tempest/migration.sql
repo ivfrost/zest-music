@@ -1,0 +1,1 @@
+ALTER TABLE `songs` ADD `last_modified` integer;

@@ -73,7 +73,7 @@ export function ActionSheet({
       return () => clearTimeout(timer);
     }
 
-    // Nothing was opened by us, and the bar belongs to the focused screen.
+    // The bar was not hidden here, so it belongs to the focused screen.
     if (!hidBarRef.current) return;
 
     Animated.timing(progress, {

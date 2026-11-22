@@ -23,17 +23,21 @@ const MIN_MATCH_SCORE = 90;
 const RETRY_DELAY_MS = 2_000;
 /** Back off briefly after a DNS/network failure instead of retrying every artist. */
 const OFFLINE_RETRY_MS = 30_000;
+/** Wikimedia rate-limits bursts of image requests, so downloads are spaced out. */
+const DOWNLOAD_INTERVAL_MS = 500;
+/** A 429 means the quota tripped. Pause instead of logging a warning per artist. */
+const THROTTLE_RETRY_MS = 60_000;
 
-let offlineUntil = 0;
+let pausedUntil = 0;
 
 type EnabledSource = Exclude<ArtistImageSource, 'off'>;
 
 type ArtistImageSize = 'thumb' | 'hero';
 
 /**
- * A resolved artwork source. Remote sources pick the width at read time; a
- * `local` entry has already been downloaded once and resized on device, so the
- * artists tab and the artist page never fetch the same picture twice.
+ * A resolved artwork source. Remote sources pick the width at read time. A
+ * `local` entry has already been downloaded once and resized on device. The
+ * artists tab and the artist page then never fetch the same picture twice.
  */
 export type ArtistImage =
   | { kind: 'commons'; file: string }
@@ -65,13 +69,21 @@ export function isNetworkError(error: unknown): boolean {
   );
 }
 
-export function isNetworkUnavailable(): boolean {
-  return Date.now() < offlineUntil;
+export function isFetchingPaused(): boolean {
+  return Date.now() < pausedUntil;
 }
 
-export function noteNetworkFailure(error: unknown): boolean {
+/**
+ * Starts a cooldown after a network error or an HTTP 429. Returns true when the
+ * caller should stop fetching, so bursts fail once instead of per artist.
+ */
+export function noteFetchFailure(error: unknown): boolean {
+  if (/status:? 429|Too Many Requests/i.test(errorText(error))) {
+    pausedUntil = Date.now() + THROTTLE_RETRY_MS;
+    return true;
+  }
   if (!isNetworkError(error)) return false;
-  offlineUntil = Date.now() + OFFLINE_RETRY_MS;
+  pausedUntil = Date.now() + OFFLINE_RETRY_MS;
   return true;
 }
 
@@ -210,12 +222,12 @@ async function getJson(
       headers: { ...DEFAULT_HEADERS, ...headers },
     });
   } catch (error) {
-    noteNetworkFailure(error);
+    noteFetchFailure(error);
     throw error;
   }
   if (response.ok) return response.json();
 
-  // MusicBrainz throttles bursts with 403/429/503; one retry is enough.
+  // MusicBrainz throttles bursts with 403, 429, and 503. One retry is enough.
   const retryable =
     response.status === 403 ||
     response.status === 429 ||
@@ -333,7 +345,6 @@ export async function readCachedArtistImages(
   const now = Date.now();
 
   const result = new Map<string, ArtistImage | null>();
-  const materialize: { artistId: string; image: ArtistImage }[] = [];
   let mutated = false;
 
   for (const artist of artists) {
@@ -345,14 +356,9 @@ export async function readCachedArtistImages(
       mutated = true;
     }
     if (now - entry.fetchedAt < CACHE_TTL_MS && matchesMode(entry, mode)) {
+      // Remote entries render from expo-image's disk cache. Downloading them
+      // here pre-warmed the whole library on every reload and hit the rate limit.
       result.set(artist.id, entry.image);
-
-      // Entries cached before local files existed download once, then serve
-      // both sizes from disk on the next read. Run these serially so one
-      // offline failure stops the rest instead of warning per artist.
-      if (entry.image && entry.image.kind !== 'local') {
-        materialize.push({ artistId: artist.id, image: entry.image });
-      }
     }
   }
 
@@ -367,21 +373,6 @@ export async function readCachedArtistImages(
 
   if (mutated) void persistCache();
 
-  if (materialize.length > 0) {
-    void (async () => {
-      for (const { artistId, image } of materialize) {
-        if (isNetworkUnavailable()) return;
-        const entry = index[artistId];
-        if (!entry || entry.image !== image) continue;
-
-        const materialized = await materializeArtistImage(artistId, image);
-        if (materialized === image) continue;
-        entry.image = materialized;
-        void persistCache();
-      }
-    })();
-  }
-
   return result;
 }
 
@@ -393,7 +384,7 @@ function artistImageDirectory(): Directory {
   return directory;
 }
 
-/** Best effort: a leftover file is harmless, a crash during prune is not. */
+/** Best effort. A leftover file is harmless. A crash during prune is not. */
 function deleteArtistImageFiles(artistId: string) {
   try {
     const directory = artistImageDirectory();
@@ -402,12 +393,20 @@ function deleteArtistImageFiles(artistId: string) {
       if (file.exists) file.delete();
     }
   } catch {
-    // Ignore: maintenance will not retry, the cache entry is already gone.
+    // Ignore. Maintenance will not retry and the cache entry is already gone.
   }
 }
 
 /** Artist ids whose download is already running, so reads do not duplicate it. */
 const materializing = new Set<string>();
+
+let nextDownloadAt = 0;
+
+async function waitForDownloadSlot(): Promise<void> {
+  const wait = nextDownloadAt - Date.now();
+  if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+  nextDownloadAt = Date.now() + DOWNLOAD_INTERVAL_MS;
+}
 
 /**
  * Downloads the hero once and writes a thumb beside it. Returns a `local` image
@@ -420,7 +419,7 @@ async function materializeArtistImage(
   if (
     image.kind === 'local' ||
     materializing.has(artistId) ||
-    isNetworkUnavailable()
+    isFetchingPaused()
   ) {
     return image;
   }
@@ -432,10 +431,16 @@ async function materializeArtistImage(
     const thumbFile = new File(directory, `${artistId}-thumb.jpg`);
 
     if (!heroFile.exists) {
+      await waitForDownloadSlot();
+      // Download beside the target: a throttled or aborted request must not
+      // leave a truncated hero that later boots would serve.
+      const partial = new File(directory, `${artistId}-hero.part`);
+      if (partial.exists) partial.delete();
       // Wikimedia rejects requests without a descriptive User-Agent (403).
-      await File.downloadFileAsync(artistImageUrl(image, 'hero'), heroFile, {
+      await File.downloadFileAsync(artistImageUrl(image, 'hero'), partial, {
         headers: { 'User-Agent': USER_AGENT },
       });
+      partial.move(heroFile);
     }
 
     if (!thumbFile.exists) {
@@ -451,7 +456,7 @@ async function materializeArtistImage(
 
     return { kind: 'local', thumb: thumbFile.uri, hero: heroFile.uri };
   } catch (error) {
-    if (!noteNetworkFailure(error)) {
+    if (!noteFetchFailure(error)) {
       console.warn('[ArtistImages] Could not cache image locally', {
         artistId,
         error,

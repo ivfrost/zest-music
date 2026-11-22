@@ -20,7 +20,7 @@ import {
   touchCacheEntry,
 } from './audioCache';
 
-/** Output categories that are the phone itself; everything else is external. */
+/** Output categories that are the phone itself. Everything else is external. */
 const BUILT_IN_OUTPUTS = new Set(['Built-in Speaker', 'Built-in Earpiece']);
 
 interface PlaybackState {
@@ -42,9 +42,9 @@ interface PlaybackState {
  *
  * The native file source only accepts filesystem paths. A SAF `content://` URI
  * is opened as a file descriptor and played through `/proc/self/fd/<fd>` when
- * the provider allows it; otherwise it is copied into the cache once. Audio is
- * streamed rather than decoded in full, which keeps long and large files
- * playable without a large memory footprint.
+ * the provider allows it. Otherwise the engine copies it into the cache once. Audio
+ * streams instead of decoding in full, so long and large files stay playable
+ * without a large memory footprint.
  */
 class AudioEngine {
   readonly audioContext = new AudioContext({ latencyHint: 'playback' });
@@ -119,9 +119,9 @@ class AudioEngine {
   }
 
   /**
-   * Pauses when the last external output disappears: unplugging headphones
-   * must not keep playing through the phone speaker. Plugging a device in
-   * never interrupts playback — the native stream follows the new route.
+   * Pauses when the last external output disappears, so unplugging headphones
+   * does not keep playing through the phone speaker. Plugging a device in does
+   * not interrupt playback, and the native stream follows the new route.
    */
   private trackOutputDevices(reason?: string) {
     this.deviceRefresh = this.deviceRefresh
@@ -183,9 +183,9 @@ class AudioEngine {
   }
 
   /**
-   * Audio focus is requested when playback starts rather than once at launch.
-   * A request made at launch is revoked by whichever app plays next, and the
-   * engine never re-requests it, leaving playback without focus.
+   * The engine requests audio focus when playback starts. Whichever app plays
+   * next revokes a request made at launch, and the engine never re-requests it,
+   * leaving playback without focus.
    */
   private requestOutputFocus() {
     try {
@@ -298,9 +298,9 @@ class AudioEngine {
   }
 
   /**
-   * Prepares a track and starts it. With `announce: false` the current track stays
-   * on screen until this one is ready, so probing a queue entry whose file is gone
-   * does not flicker through it.
+   * Prepares a track and starts it. With `announce: false`, the current track
+   * stays on screen until this one is ready. This avoids flicker when a queued
+   * file is gone.
    */
   async load(
     uri: string,
@@ -342,7 +342,7 @@ class AudioEngine {
     }
   }
 
-  /** Called by the Audio element once its file source is ready. */
+  /** The Audio element calls this once its file source is ready. */
   handleLoaded = (handle: AudioTagHandle | null) => {
     if (!handle) return;
     this.handle = handle;
@@ -471,7 +471,7 @@ class AudioEngine {
   /**
    * Restarts the current track by rebuilding its native source node from the
    * already-resolved path. An ended node is disabled and its decoder stopped, so
-   * it cannot be rewound in place; this avoids re-opening the SAF descriptor or
+   * it cannot be rewound in place. This avoids re-opening the SAF descriptor or
    * re-running the cache lookup that a full `load()` would do.
    */
   replay(): boolean {
@@ -494,7 +494,7 @@ class AudioEngine {
 
   private releaseSource() {
     this.handle = null;
-    // The Audio element owns and disposes its file source; dropping the
+    // The Audio element owns and disposes its file source. Dropping the
     // reference lets the next onLoad build a fresh media-element source.
     this.mediaSource = null;
   }
@@ -560,7 +560,7 @@ class AudioEngine {
   }
 
   /**
-   * Warms the cache for a track that will likely play next; never throws.
+   * Warms the cache for a track that will likely play next. This never throws.
    * Once descriptors work there is nothing to copy, so this becomes a no-op.
    */
   async prefetch(uri: string): Promise<void> {
@@ -610,7 +610,7 @@ class AudioEngine {
     try {
       expectedSize = source.size;
     } catch {
-      // Some providers cannot report a size; fall back to checking for emptiness.
+      // Some providers cannot report a size. Fall back to checking for emptiness.
     }
 
     const cached = this.findCachedFile(directory, key);

@@ -20,7 +20,7 @@ type PlaylistPickerProps = {
 const songLabel = (count: number) =>
   count === 1 ? '1 song' : `${count} songs`;
 
-/** Centred picker for adding one song to a playlist, creating one if needed. */
+/** Centered picker for adding one song to a playlist, creating one if needed. */
 export function PlaylistPicker({
   visible,
   songId,

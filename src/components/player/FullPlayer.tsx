@@ -10,9 +10,9 @@ import {
   useState,
 } from 'react';
 import {
+  FlatList,
   PanResponder,
   Pressable,
-  ScrollView,
   Text,
   useWindowDimensions,
   View,
@@ -34,8 +34,8 @@ import {
 import { scheduleOnRN } from 'react-native-worklets';
 import { ICON_SIZES } from '@/hooks/materialPalette';
 import { useAudioProgress } from '@/hooks/useAudio';
-import { radius, spacing } from '@/theme';
 import type { useMaterialTheme } from '@/hooks/useMaterialTheme';
+import { radius, spacing } from '@/theme';
 import type { RepeatMode } from '@/types/playback';
 
 type MaterialColors = ReturnType<typeof useMaterialTheme>['colors'];
@@ -405,8 +405,8 @@ export function FullPlayer({
   );
   const queueSheetTranslateY = useSharedValue(queueOffsetFor('closed'));
   const queueDragStartY = useRef(0);
-  // The shared value is animated on the UI thread, so its JS-side read can lag;
-  // gestures start from this ref instead.
+  // The shared value is animated on the UI thread, so its JS-side read can lag.
+  // Gestures start from this ref instead.
   const queueSettledY = useRef(queueOffsetFor('closed'));
   const queueScrollY = useRef(0);
   const coverOffset = useSharedValue(0);
@@ -614,7 +614,7 @@ export function FullPlayer({
     settleQueueSheet(queueSheetLevel);
   }, [queueSheetLevel, settleQueueSheet]);
 
-  // The player stays mounted while collapsed; reopen it with the queue shut.
+  // The player stays mounted while collapsed. Reopen it with the queue shut.
   useEffect(() => {
     if (isExpanded) return;
     settleQueueSheet('closed');
@@ -742,65 +742,62 @@ export function FullPlayer({
           >
             {title}
           </Text>
-          <View className="mt-1 flex-row flex-wrap items-center">
-            {artistLinks.length > 0 ? (
-              artistLinks.map((linkedArtist, index) => (
-                <Fragment key={linkedArtist.id}>
-                  {index > 0 ? (
-                    <Text className="text-title-medium text-on-surface-variant">
-                      {', '}
-                    </Text>
-                  ) : null}
-                  <Pressable
-                    accessibilityRole="link"
-                    accessibilityLabel={`Open artist ${linkedArtist.name}`}
-                    onPress={() => onOpenArtist(linkedArtist.id)}
-                  >
-                    <Text
-                      className="text-title-medium text-on-surface-variant"
-                      numberOfLines={1}
+          <View className="mt-1">
+            <View className="flex-row flex-wrap items-center">
+              {artistLinks.length > 0 ? (
+                artistLinks.map((linkedArtist, index) => (
+                  <Fragment key={linkedArtist.id}>
+                    {index > 0 ? (
+                      <Text className="text-title-medium text-on-surface-variant">
+                        {', '}
+                      </Text>
+                    ) : null}
+                    <Pressable
+                      accessibilityRole="link"
+                      accessibilityLabel={`Open artist ${linkedArtist.name}`}
+                      onPress={() => onOpenArtist(linkedArtist.id)}
                     >
-                      {linkedArtist.name}
-                    </Text>
-                  </Pressable>
-                </Fragment>
-              ))
-            ) : (
-              <Text
-                className="text-title-medium text-on-surface-variant"
-                numberOfLines={1}
-              >
-                {artist}
-              </Text>
-            )}
+                      <Text
+                        className="text-title-medium text-on-surface-variant"
+                        numberOfLines={1}
+                      >
+                        {linkedArtist.name}
+                      </Text>
+                    </Pressable>
+                  </Fragment>
+                ))
+              ) : (
+                <Text
+                  className="text-title-medium text-on-surface-variant"
+                  numberOfLines={1}
+                >
+                  {artist}
+                </Text>
+              )}
+            </View>
 
             {album ? (
-              <>
-                <Text className="text-title-medium text-on-surface-variant">
-                  {' · '}
-                </Text>
-                {album.id ? (
-                  <Pressable
-                    accessibilityRole="link"
-                    accessibilityLabel={`Open album ${album.title}`}
-                    onPress={() => onOpenAlbum(album.id as string)}
-                  >
-                    <Text
-                      className="text-title-medium text-on-surface-variant"
-                      numberOfLines={1}
-                    >
-                      {album.title}
-                    </Text>
-                  </Pressable>
-                ) : (
+              album.id ? (
+                <Pressable
+                  accessibilityRole="link"
+                  accessibilityLabel={`Open album ${album.title}`}
+                  onPress={() => onOpenAlbum(album.id as string)}
+                >
                   <Text
                     className="text-title-medium text-on-surface-variant"
                     numberOfLines={1}
                   >
                     {album.title}
                   </Text>
-                )}
-              </>
+                </Pressable>
+              ) : (
+                <Text
+                  className="text-title-medium text-on-surface-variant"
+                  numberOfLines={1}
+                >
+                  {album.title}
+                </Text>
+              )
             ) : null}
           </View>
         </View>
@@ -855,7 +852,10 @@ export function FullPlayer({
                 disabled={isLoading || isCoverTransitioning}
                 onPress={onPrevious}
                 className="h-full w-full items-center justify-center rounded-md3-full"
-                style={{ borderRadius: radius.full, opacity: isLoading ? 0.38 : 1 }}
+                style={{
+                  borderRadius: radius.full,
+                  opacity: isLoading ? 0.38 : 1,
+                }}
                 android_ripple={{
                   color: rippleColor,
                   borderless: false,
@@ -885,7 +885,10 @@ export function FullPlayer({
                 disabled={isLoading}
                 onPress={onToggle}
                 className="h-full w-full items-center justify-center rounded-md3-full bg-primary-container"
-                style={{ borderRadius: radius.full, opacity: isLoading ? 0.38 : 1 }}
+                style={{
+                  borderRadius: radius.full,
+                  opacity: isLoading ? 0.38 : 1,
+                }}
                 android_ripple={{
                   color: rippleColor,
                   borderless: false,
@@ -914,7 +917,10 @@ export function FullPlayer({
                 disabled={isLoading || isCoverTransitioning}
                 onPress={onNext}
                 className="h-full w-full items-center justify-center rounded-md3-full"
-                style={{ borderRadius: radius.full, opacity: isLoading ? 0.38 : 1 }}
+                style={{
+                  borderRadius: radius.full,
+                  opacity: isLoading ? 0.38 : 1,
+                }}
                 android_ripple={{
                   color: rippleColor,
                   borderless: false,
@@ -1039,24 +1045,28 @@ export function FullPlayer({
               }
               tintColor={colors.onSurfaceVariant}
             />
-            <Text className="text-body-medium font-medium text-on-surface">Up next</Text>
+            <Text className="text-body-medium font-medium text-on-surface">
+              Up next
+            </Text>
             <Text className="text-body-small text-on-surface-variant">
               {queueTracks.length}
             </Text>
           </Pressable>
         </View>
         {isQueueOpen && queueTracks.length > 0 ? (
-          <ScrollView
-            className="flex-1"
+          <FlatList
+            style={{ flex: 1 }}
+            data={queueTracks}
+            keyExtractor={track => `${track.uri}-${track.queueIndex}`}
+            initialNumToRender={12}
+            windowSize={7}
             contentContainerStyle={{ paddingBottom: spacing.xl }}
             scrollEventThrottle={16}
             onScroll={event => {
               queueScrollY.current = event.nativeEvent.contentOffset.y;
             }}
-          >
-            {queueTracks.map(track => (
+            renderItem={({ item: track }) => (
               <Pressable
-                key={`${track.uri}-${track.queueIndex}`}
                 accessibilityRole="button"
                 accessibilityLabel={`Play ${track.title} by ${track.artist}`}
                 onPress={() => {
@@ -1110,8 +1120,8 @@ export function FullPlayer({
                   </Text>
                 ) : null}
               </Pressable>
-            ))}
-          </ScrollView>
+            )}
+          />
         ) : isQueueOpen ? (
           <Text className="px-5 py-4 text-body-medium text-on-surface-variant">
             No upcoming tracks

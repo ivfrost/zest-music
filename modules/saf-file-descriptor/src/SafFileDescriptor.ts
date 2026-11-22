@@ -2,11 +2,11 @@ import { requireNativeModule } from 'expo-modules-core';
 import { Platform } from 'react-native';
 
 export type SafFileHandle = {
-  /** Keeps the descriptor alive; pass it to closeSafFileDescriptor. */
+  /** Keeps the descriptor alive. Pass it to closeSafFileDescriptor. */
   handle: number;
-  /** `/proc/self/fd/<fd>` — a real path the audio engine can open. */
+  /** `/proc/self/fd/<fd>` is a real path the audio engine can open. */
   path: string;
-  /** Size reported by the provider; zero means the descriptor is not a regular file. */
+  /** Size reported by the provider. Zero means the descriptor is not a regular file. */
   size: number;
 };
 

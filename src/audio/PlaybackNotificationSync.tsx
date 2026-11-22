@@ -71,8 +71,8 @@ export function PlaybackNotificationSync() {
 
   useEffect(() => {
     void AudioManager.requestNotificationPermissions().catch(() => {});
-    // Audio focus is requested by the engine when playback starts; a launch-time
-    // request is revoked by whichever app plays next and never re-requested.
+    // The engine requests audio focus when playback starts. Whichever app plays
+    // next revokes a launch-time request, and the engine never re-requests it.
     AudioManager.setSystemOptions({
       ios: { category: 'playback', mode: 'default' },
     });
@@ -177,8 +177,8 @@ export function PlaybackNotificationSync() {
           error,
         );
       });
-    // position only seeds the first frame; reading it live keeps ticking from
-    // calling show() every second.
+    // The position only seeds the first frame. Reading it live avoids calling
+    // show() every second.
   }, [
     currentUri,
     isPlaying,

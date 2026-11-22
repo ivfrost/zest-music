@@ -18,7 +18,7 @@ type CenteredDialogProps = {
 };
 
 /**
- * Card centred over the screen. Children size the card; pass a scrollable child
+ * Card centered over the screen. Children size the card. Pass a scrollable child
  * to let long content scroll inside the card's height cap.
  */
 export function CenteredDialog({

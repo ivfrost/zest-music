@@ -1,6 +1,14 @@
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
+import { useEffect, useRef } from 'react';
 import { Pressable, Text, View } from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+import { useAudioProgress } from '@/hooks/useAudio';
 
 type MiniPlayerProps = {
   title: string;
@@ -9,12 +17,61 @@ type MiniPlayerProps = {
   isPlaying: boolean;
   isLoading: boolean;
   hasTrack: boolean;
+  durationSeconds: number;
   onToggle: () => void;
   onSearch: () => void;
   onExpand?: () => void;
   iconColor: string;
   rippleColor: string;
 };
+
+/** Isolated so position ticks do not re-render the bar's controls. */
+function PlaybackProgress({ durationSeconds }: { durationSeconds: number }) {
+  const { positionSeconds } = useAudioProgress();
+  const fraction =
+    durationSeconds > 0
+      ? Math.min(1, Math.max(0, positionSeconds / durationSeconds))
+      : 0;
+  const animatedFraction = useSharedValue(fraction);
+  const lastTickAt = useRef(0);
+
+  useEffect(() => {
+    const now = Date.now();
+    // Native ticks are coarse. Spread each new position across the time between
+    // previous ticks, so the bar creeps instead of jumping.
+    const elapsed = lastTickAt.current ? now - lastTickAt.current : 500;
+    lastTickAt.current = now;
+
+    if (fraction < animatedFraction.value) {
+      // A new track or a backwards seek: rewind immediately.
+      animatedFraction.value = fraction;
+      return;
+    }
+
+    animatedFraction.value = withTiming(fraction, {
+      duration: Math.min(1000, Math.max(250, elapsed)),
+      easing: Easing.linear,
+    });
+  }, [animatedFraction, fraction]);
+
+  const fillStyle = useAnimatedStyle(() => ({
+    width: `${animatedFraction.value * 100}%`,
+  }));
+
+  return (
+    <View
+      accessibilityRole="progressbar"
+      accessibilityLabel="Playback progress"
+      accessibilityValue={{ min: 0, max: 100, now: Math.round(fraction * 100) }}
+      className="absolute top-0.5 left-4 right-4 h-0.5 overflow-hidden rounded-md3-full bg-outline-variant"
+    >
+      <Animated.View
+        className="h-full rounded-md3-full bg-primary"
+        style={fillStyle}
+      />
+    </View>
+  );
+}
 
 export function MiniPlayerContent({
   title,
@@ -23,6 +80,7 @@ export function MiniPlayerContent({
   isPlaying,
   isLoading,
   hasTrack,
+  durationSeconds,
   onToggle,
   onSearch,
   onExpand,
@@ -31,7 +89,7 @@ export function MiniPlayerContent({
 }: MiniPlayerProps) {
   const trackLabel = (
     <View className="flex-1 flex-row items-center">
-      <View className="mr-3 h-12 w-12 items-center justify-center overflow-hidden rounded-md3-sm bg-surface-container-high">
+      <View className="mr-3 h-12 w-12 items-center justify-center overflow-hidden rounded-md3-sm">
         {artworkUri ? (
           <Image
             accessible={false}
@@ -118,13 +176,14 @@ export function MiniPlayerContent({
           />
         </Pressable>
       </View>
+      {hasTrack ? <PlaybackProgress durationSeconds={durationSeconds} /> : null}
     </View>
   );
 }
 
 export function MiniPlayer(props: MiniPlayerProps) {
   return (
-    <View className="mx-2 mb-1 h-16 overflow-hidden rounded-md3-lg bg-surface-container">
+    <View className="mb-1 h-16 overflow-hidden rounded-md3-lg bg-surface-container-high">
       <MiniPlayerContent {...props} />
     </View>
   );

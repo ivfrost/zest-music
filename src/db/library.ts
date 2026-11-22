@@ -139,9 +139,15 @@ export async function createPlaylist(
   db: LibraryDatabase,
   title: string,
 ): Promise<string> {
-  const existing = (await db.select({
-    id: schema.playlists.id,
-  }).from(schema.playlists).where(eq(schema.playlists.title, title)).limit(1))[0];
+  const existing = (
+    await db
+      .select({
+        id: schema.playlists.id,
+      })
+      .from(schema.playlists)
+      .where(eq(schema.playlists.title, title))
+      .limit(1)
+  )[0];
   if (existing) return existing.id;
 
   const id = randomUUID();
@@ -149,17 +155,17 @@ export async function createPlaylist(
   if (__DEV__)
     console.info('[MusicLibrary] Created playlist', {
       id,
-      title
+      title,
     });
   return id;
 }
 
 /**
  * Associates a song with a playlist. Re-adding is a no-op: the join table's
- * composite primary key makes the insert idempotent, so no existence check is
- * needed.
+ * composite primary key makes the insert idempotent, so the code does not check
+ * for existence.
  *
- * @returns `true` when the association was inserted, `false` when the song was
+ * @returns `true` when the association is inserted, `false` when the song is
  * already in the playlist.
  */
 export async function addSongToPlaylist(
@@ -177,11 +183,11 @@ export async function addSongToPlaylist(
 }
 
 /**
- * Deletes a playlist. Its `song_playlists` rows are removed by the schema's
- * ON DELETE CASCADE, which is active because the app enables
+ * Deletes a playlist. The schema's ON DELETE CASCADE removes its
+ * `song_playlists` rows, and that cascade is active because the app enables
  * `PRAGMA foreign_keys` on its connection.
  *
- * @returns `true` when a playlist was deleted, `false` when the id is unknown.
+ * @returns `true` when a playlist is deleted, `false` when the id is unknown.
  */
 export async function deletePlaylist(
   db: LibraryDatabase,
@@ -197,9 +203,9 @@ export async function deletePlaylist(
 
 /**
  * Removes a song from a playlist. The song itself stays in the library, and
- * playback is unaffected: the active queue is independent of the playlist.
+ * playback continues, because the active queue is independent of the playlist.
  *
- * @returns `true` when the association was removed, `false` when it was absent.
+ * @returns `true` when the row is removed, `false` when it is absent.
  */
 export async function removeSongFromPlaylist(
   db: LibraryDatabase,
@@ -243,6 +249,7 @@ export async function readLibrary(
         lastPlayedAt: schema.songs.lastPlayedAt,
         trackNumber: schema.songs.trackNumber,
         releaseId: schema.songs.releaseId,
+        lastModified: schema.songs.lastModified,
         musicBrainzRecordingId: schema.songs.musicBrainzRecordingId,
         musicBrainzTrackId: schema.songs.musicBrainzTrackId,
         artistId: schema.releaseArtists.artistId,
@@ -287,6 +294,7 @@ export async function readLibrary(
         lastPlayedAt: row.lastPlayedAt,
         trackNumber: row.trackNumber,
         releaseId: row.releaseId,
+        lastModified: row.lastModified,
         musicBrainzRecordingId: row.musicBrainzRecordingId,
         musicBrainzTrackId: row.musicBrainzTrackId,
         artistIds: [],
@@ -328,6 +336,39 @@ export async function readLibrary(
     });
 
   return { songs, artists, releases: releaseRows };
+}
+
+/** Size and modification time of every indexed file, keyed by URI. */
+export async function readIndexedFiles(
+  db: LibraryDatabase,
+): Promise<Map<string, { size: number; lastModified: number | null }>> {
+  const rows = await db
+    .select({
+      uri: schema.songs.uri,
+      size: schema.songs.size,
+      lastModified: schema.songs.lastModified,
+    })
+    .from(schema.songs);
+
+  return new Map(
+    rows.map(row => [
+      row.uri,
+      { size: row.size, lastModified: row.lastModified },
+    ]),
+  );
+}
+
+/** Cover file URIs still referenced by a release, so the rest can be deleted. */
+export async function readReferencedArtworkUris(
+  db: LibraryDatabase,
+): Promise<Set<string>> {
+  const rows = await db
+    .select({ artworkUri: schema.releases.artworkUri })
+    .from(schema.releases);
+
+  return new Set(
+    rows.map(row => row.artworkUri).filter((uri): uri is string => !!uri),
+  );
 }
 
 /** Deletes the songs at `uris` and returns the titles it removed. */

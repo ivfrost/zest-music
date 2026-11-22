@@ -27,12 +27,12 @@ import { useAudio } from '@/hooks/useAudio';
 import { useMaterialTheme } from '@/hooks/useMaterialTheme';
 import useMusicLocations from '@/hooks/useMusicLocation';
 import { setAlbumFilter } from '@/lib/albumFilter';
-import { radius } from '@/theme';
 import {
   MINI_PLAYER_GAP,
   MINI_PLAYER_HEIGHT,
   TAB_BAR_HEIGHT,
 } from '@/lib/layout';
+import { radius } from '@/theme';
 
 export default function TabsLayout() {
   const [isTabBarHidden, setIsTabBarHidden] = useState(false);
@@ -142,8 +142,8 @@ export default function TabsLayout() {
     },
     [expandedProgress],
   );
-  // Docked island above the tab bar: narrower gutter than the content cards
-  // so it reads as chrome, but the same rounded-container language.
+  // Docked card above the tab bar, with the same insets and radius it always
+  // had. The progress line is the only addition.
   const miniPlayerBottom =
     insets.bottom + (isTabBarHidden ? 0 : TAB_BAR_HEIGHT) + MINI_PLAYER_GAP;
   const miniPlayerTop = Math.max(
@@ -284,6 +284,7 @@ export default function TabsLayout() {
                   isPlaying={isPlaying}
                   isLoading={isLoading}
                   hasTrack={hasTrack}
+                  durationSeconds={durationSeconds}
                   onToggle={togglePlayback}
                   onSearch={() => setIsSearchOpen(true)}
                   iconColor={colors.onSurface}
@@ -318,14 +319,6 @@ export default function TabsLayout() {
                 md={{ default: 'queue_music', selected: 'queue_music' }}
               />
             </NativeTabs.Trigger>
-            {__DEV__ ? (
-              <NativeTabs.Trigger name="tests" accessibilityLabel="Tests">
-                <NativeTabs.Trigger.Label>Tests</NativeTabs.Trigger.Label>
-                <NativeTabs.Trigger.Icon
-                  md={{ default: 'science', selected: 'science' }}
-                />
-              </NativeTabs.Trigger>
-            ) : null}
           </NativeTabs>
         </View>
       </TabBarContext>
@@ -351,6 +344,7 @@ export default function TabsLayout() {
               isPlaying={isPlaying}
               isLoading={isLoading}
               hasTrack={hasTrack}
+              durationSeconds={durationSeconds}
               onToggle={togglePlayback}
               onSearch={() => setIsSearchOpen(true)}
               onExpand={() => {

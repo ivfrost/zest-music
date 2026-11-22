@@ -3,7 +3,7 @@ import { z } from 'zod';
 const RepeatModeSchema = z.enum(['off', 'one', 'all']);
 export type RepeatMode = z.infer<typeof RepeatModeSchema>;
 
-// Bump on shape changes; data written with another version is discarded.
+// Bump on shape changes. Data written with another version is discarded.
 export const PLAYBACK_STORAGE_VERSION = 1;
 
 export const PlaybackSessionSchema = z.object({
