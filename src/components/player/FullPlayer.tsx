@@ -222,7 +222,7 @@ function SeekBar({
             : rawFraction;
           latestFraction.current = fraction;
           const tick = tickFor(fraction);
-          if (tick !== lastTickRef.current) {
+          if (fineScrubbingRef.current && tick !== lastTickRef.current) {
             lastTickRef.current = tick;
             Haptics.selectionAsync();
           }
