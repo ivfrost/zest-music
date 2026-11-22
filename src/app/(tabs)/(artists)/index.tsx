@@ -96,7 +96,18 @@ export default function ArtistTab() {
   const { currentUri, isPlaying, isLoading } = useAudio();
   const { colors, rippleColor, dividerColor } = useMaterialTheme();
   const { preferences } = usePreferences();
-  const artistImages = useArtistImages(artists, artistImageSource(preferences));
+  const [visibleIds, setVisibleIds] = useState<ReadonlySet<string>>(new Set());
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 0 }).current;
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: { item: Artist }[] }) => {
+      setVisibleIds(new Set(viewableItems.map(({ item }) => item.id)));
+    },
+  ).current;
+  const artistImages = useArtistImages(
+    artists,
+    artistImageSource(preferences),
+    visibleIds,
+  );
   const renderSeparator = useRowSeparator(dividerColor, 88);
 
   const listRef = useRef<FlatList<Artist>>(null);
@@ -138,6 +149,8 @@ export default function ArtistTab() {
               paddingBottom: spacing.sm,
             }}
             ItemSeparatorComponent={renderSeparator}
+            onViewableItemsChanged={onViewableItemsChanged}
+            viewabilityConfig={viewabilityConfig}
             ListEmptyComponent={
               <Text className="p-6 text-center text-on-surface-variant">
                 {emptyMessage}

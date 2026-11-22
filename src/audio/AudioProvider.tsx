@@ -598,7 +598,10 @@ export function AudioProvider({ children }: PropsWithChildren) {
           hasRepeatedCurrentTrack: false,
         });
         void audioEngine.load(uri).catch(error => {
-          console.error('[Audio] Failed to play inserted track', { uri, error });
+          console.error('[Audio] Failed to play inserted track', {
+            uri,
+            error,
+          });
         });
         return;
       }

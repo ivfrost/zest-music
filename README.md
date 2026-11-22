@@ -23,8 +23,9 @@ for fallback lookup.
 ## What works today
 
 - Grant music folders through Android's SAF picker, then scan tags into SQLite
-- Rescans skip files whose size and modification time did not change, and drop songs whose files
-  are gone while keeping the playing track on screen until playback moves on
+- Rescans run at app start and when the app returns to the foreground
+- A rescan skips files whose size and modification time did not change, and drops songs whose
+  files are gone while keeping the playing track on screen until playback moves on
 - Scanner recognizes AAC, AIFF, APE, ASF, CAF, DSD (DFF/DSF), FLAC, M4A/M4B, MP1/2/3, MP4,
   Musepack (MPC/MPP), Ogg-family (OGA/OGG/Opus/Speex), WAV, WMA and WavPack. Playback depends on
   Android native decoder support.
@@ -105,7 +106,7 @@ to the new device.
 
 | Path                 | Contents                                                                                                   |
 | -------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `modules/`           | `saf-file-descriptor`: Kotlin + TS module that opens SAF URIs as fds                                       |
+| `modules/`           | `saf-file-descriptor` opens SAF URIs as fds; `audio-tags` reads tags natively                              |
 | `patches/`           | `react-native-audio-api` patch so descriptor paths decode                                                  |
 | `src/app/`           | Expo Router routes: tabs, artist and playlist stacks, settings                                             |
 | `src/audio/`         | engine with descriptor and cache sources, provider, queue, notifications                                   |

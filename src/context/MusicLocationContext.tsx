@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { AppState } from 'react-native';
 import { audioEngine } from '@/audio/audioEngine';
 import {
   deleteSongsBatch,
@@ -62,7 +63,6 @@ type MusicLocationsContextValue = {
   removeAllMusicLocations: () => Promise<MusicLocation[]>;
   removeLocation: (location: MusicLocation) => Promise<MusicLocation[]>;
   refresh: () => Promise<MusicLocation[]>;
-  scanSavedLocations: () => Promise<Song[]>;
   releaseById: Map<string, ReleaseSummary>;
   artistNameById: Map<string, string>;
 };
@@ -75,7 +75,9 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
   const db = useMemo(() => drizzle(sqlite), [sqlite]);
   const scanGeneration = useRef(0);
   const locationRevision = useRef(0);
+  const locationsRef = useRef<MusicLocation[]>([]);
   const [locations, setLocations] = useState<MusicLocation[]>([]);
+  locationsRef.current = locations;
   const [songs, setSongs] = useState<Song[]>([]);
   const [artists, setArtists] = useState<Artist[]>([]);
   const [releases, setReleases] = useState<ReleaseSummary[]>([]);
@@ -113,13 +115,13 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
   } | null>(null);
 
   const pruneArtwork = useCallback(async () => {
-    // A track kept on screen after its rows were deleted keeps its cover too.
+    // A track that stays on screen after its rows are deleted also keeps its cover.
     if (removedSongRef.current) return;
     pruneCoverFiles(await readReferencedArtworkUris(db));
   }, [db]);
 
-  // Snapshots the playing track's display data before its rows are deleted.
-  // The player then keeps showing it, artwork included, until playback moves on.
+  // Snapshots the playing track before its rows are deleted. The player keeps
+  // showing it, artwork included, until playback moves on.
   const retainNowPlaying = useCallback(
     (wasRemoved: (song: Song) => boolean) => {
       const currentUri = audioEngine.getSnapshot().currentUri;
@@ -199,41 +201,37 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
     async (
       savedLocations: MusicLocation[],
       source = 'scan',
-      force = false,
     ): Promise<Song[]> => {
       const generation = ++scanGeneration.current;
       const isCancelled = () => generation !== scanGeneration.current;
 
-      // Rows indexed before mtime was stored have a null marker. They fall back
-      // to size alone, so an upgrade does not rescan the whole library once.
-      const indexedFiles = await readIndexedFiles(db);
-      const isUnchanged = (file: File) => {
-        if (force) return false;
-        const indexed = indexedFiles.get(file.uri);
-        return (
-          indexed !== undefined &&
-          indexed.size === file.size &&
-          (indexed.lastModified === null ||
-            indexed.lastModified === file.lastModified)
-        );
-      };
-
-      // Publishes progress mid-scan. The reload at the end stays authoritative.
+      // Rows indexed before mtime was stored have a null marker and match on size
+      // alone. An upgrade therefore does not rescan the whole library once.
+      const indexed = await readIndexedFiles(db);
       const flusher = createProgressFlusher(() =>
         loadLibraryFromDatabase(source, () => !isCancelled()),
       );
 
-      let skipped = 0;
-      let removedCount = 0;
-      let visited = 0;
       const pending: File[] = [];
+      const changed = (file: File) => {
+        const entry = indexed.get(file.uri);
+        return (
+          entry?.size !== file.size ||
+          (entry.lastModified !== null &&
+            entry.lastModified !== file.lastModified)
+        );
+      };
 
-      async function flushPending(): Promise<void> {
-        if (pending.length === 0) return;
-        const batch = pending.splice(0, pending.length);
-        await indexAudioFiles(db, batch, reportSong);
+      async function flush(): Promise<void> {
+        const batch = pending.splice(0);
+        if (batch.length === 0) return;
+        try {
+          await indexAudioFiles(db, batch, reportSong);
+        } catch (error) {
+          console.warn(`Could not index ${batch.length} music files:`, error);
+        }
         for (const file of batch) {
-          indexedFiles.set(file.uri, {
+          indexed.set(file.uri, {
             size: file.size,
             lastModified: file.lastModified,
           });
@@ -245,8 +243,15 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
         directory: Directory,
         seen: Set<string>,
       ): Promise<void> {
-        if (isCancelled()) return;
-        for (const item of directory.list()) {
+        let items: ReturnType<Directory['list']>;
+        try {
+          items = directory.list();
+        } catch (error) {
+          console.warn(`Could not list ${directory.uri}:`, error);
+          return;
+        }
+
+        for (const item of items) {
           if (isCancelled()) return;
           if (item instanceof Directory) {
             await visit(item, seen);
@@ -256,17 +261,13 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
           seen.add(item.uri);
 
           // A large SAF folder would otherwise hold the JS thread for the whole walk.
-          if (visited++ % 100 === 0) {
+          if (seen.size % 100 === 0) {
             await new Promise(resolve => setTimeout(resolve, 0));
           }
 
-          if (isUnchanged(item)) {
-            skipped += 1;
-            continue;
-          }
-
+          if (!changed(item)) continue;
           pending.push(item);
-          if (pending.length >= INDEX_BATCH_SIZE) await flushPending();
+          if (pending.length >= INDEX_BATCH_SIZE) await flush();
         }
       }
 
@@ -278,43 +279,33 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
           setScanningAction('scan');
           setScanningLocationUri(location.uri);
           setScanningSongTitle(null);
-          skipped = 0;
-          removedCount = 0;
 
           // Songs whose rows exist but whose files the walk did not find are gone.
-          // A walk that throws leaves the location's rows untouched.
+          // A failed walk leaves the location's rows untouched.
           const seen = new Set<string>();
           try {
             await visit(new Directory(location.uri), seen);
-            await flushPending();
+            await flush();
             const prefix = location.uri.endsWith('/')
               ? location.uri
               : `${location.uri}/`;
-            const missing = [...indexedFiles.keys()].filter(
+            const missing = [...indexed.keys()].filter(
               uri => uri.startsWith(prefix) && !seen.has(uri),
             );
             retainNowPlaying(song => missing.includes(song.uri));
+
             for (let i = 0; i < missing.length; i += PURGE_BATCH_SIZE) {
               if (isCancelled()) return [];
-              const batch = missing.slice(i, i + PURGE_BATCH_SIZE);
-              const removed = await deleteSongsByUris(db, batch);
-              const lastTitle = removed[removed.length - 1];
-              if (lastTitle) reportSong(lastTitle);
-              removedCount += removed.length;
+              await deleteSongsByUris(
+                db,
+                missing.slice(i, i + PURGE_BATCH_SIZE),
+              );
               flusher.request();
             }
             if (missing.length > 0) await purgeOrphanedRows(db);
           } catch (error) {
             console.warn(`Could not scan music folder ${location.uri}:`, error);
           }
-
-          if (__DEV__)
-            console.info('[MusicLibrary] Scanned folder', {
-              source,
-              uri: location.uri,
-              skipped,
-              removed: removedCount,
-            });
         }
       } finally {
         // A superseded scan must not clear the folder the newer scan announced.
@@ -364,8 +355,8 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
     refresh('app-boot', false)
       .then(loaded => {
         if (cancelled) return;
-        // The cached library is on screen by now. Walk the folders on the next tick
-        // instead of competing with the first render for the JS thread.
+        // The cached library is on screen by now. Walk the folders on the next tick so
+        // they do not compete with the first render for the JS thread.
         setTimeout(() => {
           if (cancelled) return;
           setIsScanning(true);
@@ -383,6 +374,21 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
       scanGeneration.current += 1;
     };
   }, [refresh, scanLocations]);
+
+  // A foreground scan picks up files added or removed while the app was away.
+  // The scan skips unchanged files, so this only walks the folders.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', state => {
+      const loaded = locationsRef.current;
+      if (state !== 'active' || loaded.length === 0) return;
+
+      setIsScanning(true);
+      scanLocations(loaded, 'foreground')
+        .catch(error => console.warn('Unable to scan music folders:', error))
+        .finally(() => setIsScanning(false));
+    });
+    return () => subscription.remove();
+  }, [scanLocations]);
 
   const addLocation = useCallback(
     async (location: MusicLocation) => {
@@ -510,11 +516,6 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
     [purgeSongs],
   );
 
-  const scanSavedLocations = useCallback(
-    () => scanLocations(locations, 'manual-rescan', true),
-    [locations, scanLocations],
-  );
-
   const releaseById = useMemo(
     () => new Map(releases.map(release => [release.id, release])),
     [releases],
@@ -539,7 +540,6 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
       removeAllMusicLocations,
       removeLocation,
       refresh,
-      scanSavedLocations,
       releaseById,
       artistNameById,
     }),
@@ -557,7 +557,6 @@ export function MusicLocationsProvider({ children }: PropsWithChildren) {
       removeAllMusicLocations,
       removeLocation,
       refresh,
-      scanSavedLocations,
       releaseById,
       artistNameById,
     ],

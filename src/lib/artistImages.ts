@@ -1,5 +1,4 @@
 import { Directory, File, Paths } from 'expo-file-system';
-import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { USER_AGENT } from '@/lib/http';
 import { STORAGE_KEYS, storage } from '@/lib/storage';
 import type { Artist } from '@/types/artists';
@@ -36,8 +35,8 @@ type ArtistImageSize = 'thumb' | 'hero';
 
 /**
  * A resolved artwork source. Remote sources pick the width at read time. A
- * `local` entry has already been downloaded once and resized on device. The
- * artists tab and the artist page then never fetch the same picture twice.
+ * `local` entry has both sizes downloaded once, so the artists tab and the
+ * artist page never fetch the same picture twice.
  */
 export type ArtistImage =
   | { kind: 'commons'; file: string }
@@ -45,7 +44,6 @@ export type ArtistImage =
   | { kind: 'local'; thumb: string; hero: string };
 
 const ARTIST_IMAGE_DIRECTORY = 'artist-images';
-const THUMB_WIDTH = 256;
 
 /** Deezer only serves a fixed set of square sizes, so it gets its own scale. */
 const IMAGE_WIDTHS: Record<
@@ -400,6 +398,9 @@ function deleteArtistImageFiles(artistId: string) {
 /** Artist ids whose download is already running, so reads do not duplicate it. */
 const materializing = new Set<string>();
 
+/** Lookups already running, keyed by source and artist. */
+const lookups = new Map<string, Promise<ArtistImage | null>>();
+
 let nextDownloadAt = 0;
 
 async function waitForDownloadSlot(): Promise<void> {
@@ -408,9 +409,29 @@ async function waitForDownloadSlot(): Promise<void> {
   nextDownloadAt = Date.now() + DOWNLOAD_INTERVAL_MS;
 }
 
+/** Downloads once per file. The `.part` name keeps a truncated write from being served. */
+async function downloadTo(
+  directory: Directory,
+  name: string,
+  url: string,
+): Promise<File> {
+  const target = new File(directory, name);
+  if (target.exists) return target;
+
+  await waitForDownloadSlot();
+  const partial = new File(directory, `${name}.part`);
+  if (partial.exists) partial.delete();
+  // Wikimedia rejects requests without a descriptive User-Agent (403).
+  await File.downloadFileAsync(url, partial, {
+    headers: { 'User-Agent': USER_AGENT },
+  });
+  partial.move(target);
+  return target;
+}
+
 /**
- * Downloads the hero once and writes a thumb beside it. Returns a `local` image
- * on success, or the original remote source if anything fails.
+ * Downloads both sizes once. Returns a `local` image on success, or the original
+ * remote source if anything fails.
  */
 async function materializeArtistImage(
   artistId: string,
@@ -427,32 +448,18 @@ async function materializeArtistImage(
   materializing.add(artistId);
   try {
     const directory = artistImageDirectory();
-    const heroFile = new File(directory, `${artistId}-hero.jpg`);
-    const thumbFile = new File(directory, `${artistId}-thumb.jpg`);
-
-    if (!heroFile.exists) {
-      await waitForDownloadSlot();
-      // Download beside the target: a throttled or aborted request must not
-      // leave a truncated hero that later boots would serve.
-      const partial = new File(directory, `${artistId}-hero.part`);
-      if (partial.exists) partial.delete();
-      // Wikimedia rejects requests without a descriptive User-Agent (403).
-      await File.downloadFileAsync(artistImageUrl(image, 'hero'), partial, {
-        headers: { 'User-Agent': USER_AGENT },
-      });
-      partial.move(heroFile);
-    }
-
-    if (!thumbFile.exists) {
-      const context = ImageManipulator.manipulate(heroFile.uri);
-      context.resize({ width: THUMB_WIDTH });
-      const rendered = await context.renderAsync();
-      const saved = await rendered.saveAsync({
-        compress: 0.85,
-        format: SaveFormat.JPEG,
-      });
-      new File(saved.uri).move(thumbFile, { overwrite: true });
-    }
+    // Both sizes come from the server; decoding a full-size hero on device is
+    // what exhausted the heap.
+    const heroFile = await downloadTo(
+      directory,
+      `${artistId}-hero.jpg`,
+      artistImageUrl(image, 'hero'),
+    );
+    const thumbFile = await downloadTo(
+      directory,
+      `${artistId}-thumb.jpg`,
+      artistImageUrl(image, 'thumb'),
+    );
 
     return { kind: 'local', thumb: thumbFile.uri, hero: heroFile.uri };
   } catch (error) {
@@ -468,7 +475,23 @@ async function materializeArtistImage(
   }
 }
 
-export async function fetchArtistImage(
+export function fetchArtistImage(
+  artist: ArtistIdentity,
+  mode: EnabledSource,
+): Promise<ArtistImage | null> {
+  const key = `${mode}:${artist.id}`;
+  const running = lookups.get(key);
+  if (running) return running;
+
+  // Concurrent readers share one request, so a 503 is reported once.
+  const lookup = lookupArtistImage(artist, mode).finally(() => {
+    lookups.delete(key);
+  });
+  lookups.set(key, lookup);
+  return lookup;
+}
+
+async function lookupArtistImage(
   artist: ArtistIdentity,
   mode: EnabledSource,
 ): Promise<ArtistImage | null> {

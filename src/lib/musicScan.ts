@@ -127,9 +127,9 @@ export async function storeArtwork(
 }
 
 /**
- * Deletes cover files no release points at. Covers are content-addressed and only
- * re-extracted by indexing the audio file, so they are collected by reference
- * rather than expired by age.
+ * Deletes cover files that no release points at. A cover is content-addressed and
+ * only re-extracted by indexing the audio file. This collects covers by reference
+ * and does not expire them by age.
  */
 export function pruneCoverFiles(referenced: ReadonlySet<string>): void {
   const directory = coversDirectory();
@@ -140,7 +140,7 @@ export function pruneCoverFiles(referenced: ReadonlySet<string>): void {
     try {
       item.delete();
     } catch {
-      // A failed delete leaves one orphan behind. The next prune retries.
+      // A failed delete leaves one orphan behind. The next prune retries it.
     }
   }
 }

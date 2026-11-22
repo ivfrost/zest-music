@@ -43,3 +43,4 @@ yarn-error.*
 # others
 /docs
 modules/*/android/build
+modules/*/android/.gradle

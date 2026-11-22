@@ -1,3 +1,4 @@
+import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import {
@@ -27,6 +28,7 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+
 import {
   SafeAreaView,
   useSafeAreaInsets,
@@ -127,6 +129,7 @@ function SeekBar({
       ? Math.min(1, Math.max(0, positionSeconds / durationSeconds))
       : 0;
   const displayedFraction = draftFraction ?? progress;
+  const lastTickRef = useRef<number | null>(null);
 
   widthRef.current = trackWidth;
   durationRef.current = durationSeconds;
@@ -173,6 +176,11 @@ function SeekBar({
     }, 400);
   };
 
+  const tickFor = (fraction: number) =>
+    Math.round(
+      (fraction * durationRef.current) / (fineScrubbingRef.current ? 1 : 5),
+    );
+
   const panResponder = useMemo(
     () =>
       PanResponder.create({
@@ -190,6 +198,7 @@ function SeekBar({
           );
           startFraction.current = fraction;
           latestFraction.current = fraction;
+          lastTickRef.current = tickFor(fraction);
           latestGestureDx.current = 0;
           fineScrubbingRef.current = false;
           setDraftFraction(fraction);
@@ -212,6 +221,11 @@ function SeekBar({
               )
             : rawFraction;
           latestFraction.current = fraction;
+          const tick = tickFor(fraction);
+          if (tick !== lastTickRef.current) {
+            lastTickRef.current = tick;
+            Haptics.selectionAsync();
+          }
           setDraftFraction(fraction);
           scheduleFineScrub();
         },

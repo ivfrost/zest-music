@@ -1,4 +1,3 @@
-import type { IAudioMetadata } from 'music-metadata';
 import type { ReleaseType } from '@/types/releases';
 
 export function titleFromFilename(filename: string): string {
@@ -17,11 +16,11 @@ export function firstTagValue(
 }
 
 export function releaseTypeFromTags(
-  metadata: IAudioMetadata['common'],
+  releaseTypes: readonly string[],
 ): ReleaseType {
-  const releaseTypes = (metadata.releasetype ?? []).join(' ').toLowerCase();
-  if (releaseTypes.includes('single')) return 'single';
-  if (releaseTypes.includes('ep')) return 'ep';
-  if (releaseTypes.includes('album')) return 'album';
+  const joined = releaseTypes.join(' ').toLowerCase();
+  if (joined.includes('single')) return 'single';
+  if (joined.includes('ep')) return 'ep';
+  if (joined.includes('album')) return 'album';
   return 'unknown';
 }

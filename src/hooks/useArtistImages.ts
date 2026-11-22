@@ -18,6 +18,7 @@ const failed = new Set<string>();
 export function useArtistImages(
   artists: readonly Artist[],
   source: ArtistImageSource,
+  visible?: ReadonlySet<string>,
 ): ReadonlyMap<string, ArtistImage | null> {
   const [images, setImages] = useState<ReadonlyMap<string, ArtistImage | null>>(
     new Map(),
@@ -38,6 +39,8 @@ export function useArtistImages(
       setImages(new Map(cached));
 
       for (const artist of artists) {
+        // Only rows on screen ask the network and decode artwork.
+        if (visible && !visible.has(artist.id)) continue;
         if (
           isFetchingPaused() ||
           cached.has(artist.id) ||
@@ -53,12 +56,14 @@ export function useArtistImages(
           setImages(previous => new Map(previous).set(artist.id, url));
         } catch (error) {
           if (noteFetchFailure(error)) break;
+          if (cancelled) return;
+          const key = `${mode}:${artist.id}`;
+          if (failed.has(key)) continue;
+          failed.add(key);
           console.warn('[ArtistImages] Lookup failed', {
             artist: artist.name,
             error,
           });
-          failed.add(`${mode}:${artist.id}`);
-          if (cancelled) return;
           setImages(previous => new Map(previous).set(artist.id, null));
         }
 
@@ -69,7 +74,7 @@ export function useArtistImages(
     return () => {
       cancelled = true;
     };
-  }, [artists, source]);
+  }, [artists, source, visible]);
 
   return images;
 }

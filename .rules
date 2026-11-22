@@ -61,3 +61,8 @@ repository is deleted or moved.
 
 - Describe code changes only. README and other documentation-only changes stay out of the body.
 - No `Co-Authored-By` trailer.
+
+# Validation
+
+- Never run a typecheck or a build unless the user asks for one.
+- Typecheck only immediately before a commit.

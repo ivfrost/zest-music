@@ -1,6 +1,7 @@
+import * as Haptics from 'expo-haptics';
 import { router, usePathname } from 'expo-router';
 import { NativeTabs } from 'expo-router/native-tabs';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BackHandler,
   PanResponder,
@@ -72,6 +73,7 @@ export default function TabsLayout() {
         : null,
     [currentSong, releaseById],
   );
+  const lastSeekRef = useRef<number | null>(null);
   // A removed folder no longer contains the playing track, so its captured data
   // stands in for the library lookup until playback moves on.
   const playingTitle = removedNowPlaying?.title ?? currentTitle;

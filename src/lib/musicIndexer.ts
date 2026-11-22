@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'expo-crypto';
 import type { File } from 'expo-file-system';
-import { type IAudioMetadata, parseFromTokenizer } from 'music-metadata';
+import { parseFromTokenizer } from 'music-metadata';
 import { fromBlob } from 'strtok3';
 import {
   findOrCreateArtists,
@@ -9,6 +9,7 @@ import {
   type LibraryDatabase,
 } from '@/db/library';
 import * as schema from '@/db/schema';
+import { readAudioTags as readNativeAudioTags } from '../../modules/audio-tags';
 import { AudioFileBlob } from './audioFileBlob';
 import {
   firstTagValue,
@@ -17,6 +18,86 @@ import {
   titleFromFilename,
 } from './musicMetadata';
 import { storeArtwork } from './musicScan';
+
+/** Tag values the row builder needs, whichever parser produced them. */
+type AudioTags = {
+  title: string | null;
+  album: string | null;
+  albumArtists: string[];
+  artists: string[];
+  trackNumber: number | null;
+  duration: number | null;
+  releaseTypes: string[];
+  musicBrainzAlbumId: string | null;
+  musicBrainzReleaseGroupId: string | null;
+  musicBrainzRecordingId: string | null;
+  musicBrainzTrackId: string | null;
+  musicBrainzArtistIds: (string | null)[];
+  musicBrainzAlbumArtistIds: (string | null)[];
+  artworkUri: string | null;
+};
+
+/** Runs the native reader first. Formats it does not cover use `music-metadata`. */
+async function readTags(file: File): Promise<AudioTags> {
+  const native = await readNativeAudioTags(file.uri);
+  if (native) {
+    return {
+      title: native.title || null,
+      album: native.album || null,
+      albumArtists: native.albumArtists,
+      artists: native.artists,
+      trackNumber: native.trackNumber || null,
+      duration:
+        native.durationSeconds > 0 ? Math.round(native.durationSeconds) : null,
+      releaseTypes: native.releaseType,
+      musicBrainzAlbumId: native.musicBrainzAlbumId || null,
+      musicBrainzReleaseGroupId: native.musicBrainzReleaseGroupId || null,
+      musicBrainzRecordingId: native.musicBrainzRecordingId || null,
+      musicBrainzTrackId: native.musicBrainzTrackId || null,
+      musicBrainzArtistIds: native.musicBrainzArtistIds,
+      musicBrainzAlbumArtistIds: native.musicBrainzAlbumArtistIds,
+      artworkUri: native.artworkUri || null,
+    };
+  }
+
+  return readTagsWithMusicMetadata(file);
+}
+
+/** The original JS parser, used where the native reader has no format support. */
+async function readTagsWithMusicMetadata(file: File): Promise<AudioTags> {
+  const tokenizer = fromBlob(new AudioFileBlob(file) as unknown as Blob, {
+    fileInfo: { path: file.name, size: file.size },
+  });
+  let metadata;
+  try {
+    metadata = await parseFromTokenizer(tokenizer);
+  } finally {
+    await tokenizer.close();
+  }
+
+  const tags = metadata.common;
+  const rawDuration = metadata.format.duration;
+
+  return {
+    title: tags.title?.trim() || null,
+    album: tags.album?.trim() || null,
+    albumArtists: tagValues(tags.albumartists ?? tags.albumartist),
+    artists: tagValues(tags.artists ?? tags.artist),
+    trackNumber: tags.track?.no ?? null,
+    duration:
+      typeof rawDuration === 'number' && Number.isFinite(rawDuration)
+        ? Math.round(rawDuration)
+        : null,
+    releaseTypes: tagValues(tags.releasetype),
+    musicBrainzAlbumId: firstTagValue(tags.musicbrainz_albumid),
+    musicBrainzReleaseGroupId: firstTagValue(tags.musicbrainz_releasegroupid),
+    musicBrainzRecordingId: firstTagValue(tags.musicbrainz_recordingid),
+    musicBrainzTrackId: firstTagValue(tags.musicbrainz_trackid),
+    musicBrainzArtistIds: tagValues(tags.musicbrainz_artistid),
+    musicBrainzAlbumArtistIds: tagValues(tags.musicbrainz_albumartistid),
+    artworkUri: await storeArtwork(tags.picture?.[0]),
+  };
+}
 
 /**
  * Reads the tags of one audio file and upserts its release, artists and song rows.
@@ -27,55 +108,31 @@ export async function indexAudioFile(
   db: LibraryDatabase,
   file: File,
 ): Promise<string> {
-  const tokenizer = fromBlob(new AudioFileBlob(file) as unknown as Blob, {
-    fileInfo: { path: file.name, size: file.size },
-  });
-  let metadata: IAudioMetadata;
-  try {
-    metadata = await parseFromTokenizer(tokenizer);
-  } finally {
-    await tokenizer.close();
-  }
+  const tags = await readTags(file);
+  const title = tags.title || titleFromFilename(file.name);
 
-  const tags = metadata.common;
-  const rawDuration = metadata.format.duration;
-  const duration =
-    typeof rawDuration === 'number' && Number.isFinite(rawDuration)
-      ? Math.round(rawDuration)
-      : null;
-  const title = tags.title?.trim() || titleFromFilename(file.name);
-
-  const releaseTitle = tags.album?.trim() || 'Unknown Album';
-  const musicBrainzReleaseId = firstTagValue(tags.musicbrainz_albumid);
-  const musicBrainzReleaseGroupId = firstTagValue(
-    tags.musicbrainz_releasegroupid,
-  );
-  const artworkUri = await storeArtwork(tags.picture?.[0]);
-  const releaseId = await findOrCreateRelease(db, {
-    title: releaseTitle,
-    type: releaseTypeFromTags(tags),
-    musicBrainzId: musicBrainzReleaseId,
-    musicBrainzReleaseGroupId,
-    artworkUri,
-  });
-
-  const albumArtistNames = tagValues(tags.albumartists ?? tags.albumartist);
-  const trackArtistNames = tagValues(tags.artists ?? tags.artist);
+  const albumArtistNames = tags.albumArtists;
   const tagArtistNames = albumArtistNames.length
     ? albumArtistNames
-    : trackArtistNames;
+    : tags.artists;
   const names = tagArtistNames.length ? tagArtistNames : ['Unknown Artist'];
-  const rawArtistIds = tagValues(
-    albumArtistNames.length
-      ? tags.musicbrainz_albumartistid
-      : tags.musicbrainz_artistid,
-  );
+  const rawArtistIds = albumArtistNames.length
+    ? tags.musicBrainzAlbumArtistIds
+    : tags.musicBrainzArtistIds;
   const artistMusicBrainzIds =
     rawArtistIds.length === names.length
       ? rawArtistIds
       : names.length === 1
         ? [rawArtistIds[0] ?? null]
         : [];
+
+  const releaseId = await findOrCreateRelease(db, {
+    title: tags.album || 'Unknown Album',
+    type: releaseTypeFromTags(tags.releaseTypes),
+    musicBrainzId: tags.musicBrainzAlbumId,
+    musicBrainzReleaseGroupId: tags.musicBrainzReleaseGroupId,
+    artworkUri: tags.artworkUri,
+  });
   const artistIds = await findOrCreateArtists(db, names, artistMusicBrainzIds);
 
   for (const artistId of artistIds) {
@@ -89,9 +146,9 @@ export async function indexAudioFile(
       .onConflictDoNothing();
   }
 
-  const musicBrainzRecordingId = firstTagValue(tags.musicbrainz_recordingid);
-  const musicBrainzTrackId = firstTagValue(tags.musicbrainz_trackid);
-  const trackNumber = tags.track?.no ?? null;
+  const musicBrainzRecordingId = tags.musicBrainzRecordingId;
+  const musicBrainzTrackId = tags.musicBrainzTrackId;
+  const trackNumber = tags.trackNumber;
   const byMusicBrainzId = musicBrainzRecordingId
     ? await db
         .select({ id: schema.songs.id })
@@ -113,7 +170,7 @@ export async function indexAudioFile(
     uri: file.uri,
     size: file.size,
     lastModified: file.lastModified,
-    duration,
+    duration: tags.duration,
     trackNumber,
     releaseId,
     musicBrainzRecordingId,
@@ -142,8 +199,8 @@ export async function indexAudioFile(
 }
 
 /**
- * Indexes files a batch at a time so SQLite commits and fsyncs once per batch
- * instead of once per row. One unreadable file does not abort the batch.
+ * Indexes files in batches. SQLite commits and fsyncs once per batch, not once per
+ * row. One unreadable file does not abort the batch.
  */
 export async function indexAudioFiles(
   db: LibraryDatabase,
