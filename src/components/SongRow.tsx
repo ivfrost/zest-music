@@ -1,3 +1,4 @@
+import type { ComponentProps } from 'react';
 import { Text } from 'react-native';
 import { formatDuration } from '@/lib/format';
 import { Row } from './Row';
@@ -11,6 +12,7 @@ type SongRowProps = {
   iconColor: string;
   rippleColor: string;
   durationSeconds?: number | null;
+  onLayout?: ComponentProps<typeof Row>['onLayout'];
 };
 
 export function SongRow({ durationSeconds, ...props }: SongRowProps) {

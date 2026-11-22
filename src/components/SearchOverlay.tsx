@@ -21,10 +21,15 @@ import { ArtistRow } from '@/components/ArtistRow';
 import { Row } from '@/components/Row';
 import { useRowSeparator } from '@/components/RowSeparator';
 import { SongRow } from '@/components/SongRow';
+import { useArtistImages } from '@/hooks/useArtistImages';
 import { useAudio } from '@/hooks/useAudio';
 import { useMaterialTheme } from '@/hooks/useMaterialTheme';
 import useMusicLocations from '@/hooks/useMusicLocation';
+import { usePreferences } from '@/hooks/usePreferences';
 import { setAlbumFilter } from '@/lib/albumFilter';
+import { artistImageUrl } from '@/lib/artistImages';
+import { usePlayStats } from '@/lib/playStats';
+import { artistImageSource } from '@/lib/preferences';
 import { foldForSearch } from '@/lib/search';
 import type { Artist } from '@/types/artists';
 import type { ReleaseSummary } from '@/types/releases';
@@ -58,31 +63,97 @@ export function SearchOverlay({ initialScope, onClose }: SearchOverlayProps) {
   const [query, setQuery] = useState('');
   const [scope, setScope] = useState<SearchScope>(initialScope);
   const searchInputRef = useRef<TextInputInstance>(null);
+  const played = usePlayStats();
 
   const normalized = foldForSearch(query.trim());
 
+  // Search has its own order: favorites first, independent of the Songs tab's sort.
+  const songPlayCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const song of songs) {
+      counts.set(
+        song.uri,
+        song.playCount + (played.increments[song.uri] ?? 0),
+      );
+    }
+    return counts;
+  }, [songs, played.increments]);
+
+  const albumPlayCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const song of songs) {
+      counts.set(
+        song.releaseId,
+        (counts.get(song.releaseId) ?? 0) +
+          (songPlayCounts.get(song.uri) ?? 0),
+      );
+    }
+    return counts;
+  }, [songs, songPlayCounts]);
+
+  const artistPlayCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const song of songs) {
+      const songCount = songPlayCounts.get(song.uri) ?? 0;
+      for (const artistId of song.artistIds) {
+        counts.set(artistId, (counts.get(artistId) ?? 0) + songCount);
+      }
+    }
+    return counts;
+  }, [songs, songPlayCounts]);
+
   const songResults = useMemo(() => {
     if (!normalized) return [];
-    return songs.filter(song => {
-      if (foldForSearch(song.title).includes(normalized)) return true;
-      const { artist } = getSongDisplayInfo(song, artistNameById);
-      return foldForSearch(artist).includes(normalized);
-    });
-  }, [songs, artistNameById, normalized]);
+    return songs
+      .filter(song => {
+        if (foldForSearch(song.title).includes(normalized)) return true;
+        const { artist } = getSongDisplayInfo(song, artistNameById);
+        return foldForSearch(artist).includes(normalized);
+      })
+      .sort(
+        (a, b) =>
+          (songPlayCounts.get(b.uri) ?? 0) - (songPlayCounts.get(a.uri) ?? 0),
+      );
+  }, [songs, artistNameById, normalized, songPlayCounts]);
 
   const artistResults = useMemo(() => {
     if (!normalized) return [];
-    return artists.filter(artist =>
-      foldForSearch(artist.name).includes(normalized),
-    );
-  }, [artists, normalized]);
+    return artists
+      .filter(artist => foldForSearch(artist.name).includes(normalized))
+      .sort(
+        (a, b) =>
+          (artistPlayCounts.get(b.id) ?? 0) -
+          (artistPlayCounts.get(a.id) ?? 0),
+      );
+  }, [artists, normalized, artistPlayCounts]);
 
   const albumResults = useMemo(() => {
     if (!normalized) return [];
-    return releases.filter(release =>
-      foldForSearch(release.title).includes(normalized),
-    );
-  }, [releases, normalized]);
+    return releases
+      .filter(release => foldForSearch(release.title).includes(normalized))
+      .sort(
+        (a, b) =>
+          (albumPlayCounts.get(b.id) ?? 0) -
+          (albumPlayCounts.get(a.id) ?? 0),
+      );
+  }, [releases, normalized, albumPlayCounts]);
+
+  const { preferences } = usePreferences();
+  const [visibleArtistIds, setVisibleArtistIds] = useState<
+    ReadonlySet<string>
+  >(new Set());
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 0 }).current;
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: { item: Artist }[] }) => {
+      setVisibleArtistIds(new Set(viewableItems.map(({ item }) => item.id)));
+    },
+  ).current;
+  // Only rows on screen ask MusicBrainz for a photo.
+  const artistImages = useArtistImages(
+    scope === 'artists' ? artistResults : [],
+    artistImageSource(preferences),
+    visibleArtistIds,
+  );
 
   const closeAnd = (action: () => void) => {
     onClose();
@@ -202,6 +273,7 @@ export function SearchOverlay({ initialScope, onClose }: SearchOverlayProps) {
 
             {scope === 'songs' ? (
               <FlatList<Song>
+                key="songs"
                 data={songResults}
                 keyExtractor={song => song.uri}
                 keyboardShouldPersistTaps="handled"
@@ -332,34 +404,46 @@ export function SearchOverlay({ initialScope, onClose }: SearchOverlayProps) {
               />
             ) : scope === 'artists' ? (
               <FlatList<Artist>
+                key="artists"
                 data={artistResults}
                 keyExtractor={artist => artist.id}
                 keyboardShouldPersistTaps="handled"
                 contentContainerClassName="py-2"
                 ItemSeparatorComponent={renderSeparator}
+                onViewableItemsChanged={onViewableItemsChanged}
+                viewabilityConfig={viewabilityConfig}
                 ListEmptyComponent={
                   <Text className="p-6 text-center text-on-surface-variant">
                     {emptyMessage}
                   </Text>
                 }
-                renderItem={({ item: artist }) => (
-                  <ArtistRow
-                    name={artist.name}
-                    iconColor={colors.onSurfaceVariant}
-                    rippleColor={rippleColor}
-                    onPress={() =>
-                      closeAnd(() =>
-                        router.push({
-                          pathname: '/artists/[id]',
-                          params: { id: artist.id },
-                        }),
-                      )
-                    }
-                  />
-                )}
+                renderItem={({ item: artist }) => {
+                  const artistImage = artistImages.get(artist.id);
+                  return (
+                    <ArtistRow
+                      name={artist.name}
+                      artworkUri={
+                        artistImage
+                          ? artistImageUrl(artistImage, 'thumb')
+                          : null
+                      }
+                      iconColor={colors.onSurfaceVariant}
+                      rippleColor={rippleColor}
+                      onPress={() =>
+                        closeAnd(() =>
+                          router.push({
+                            pathname: '/artists/[id]',
+                            params: { id: artist.id },
+                          }),
+                        )
+                      }
+                    />
+                  );
+                }}
               />
             ) : (
               <FlatList<ReleaseSummary>
+                key="albums"
                 data={albumResults}
                 keyExtractor={release => release.id}
                 keyboardShouldPersistTaps="handled"

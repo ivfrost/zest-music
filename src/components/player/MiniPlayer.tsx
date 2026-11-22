@@ -183,7 +183,7 @@ export function MiniPlayerContent({
 
 export function MiniPlayer(props: MiniPlayerProps) {
   return (
-    <View className="mb-1 h-16 overflow-hidden rounded-md3-lg bg-surface-container-high">
+    <View className="mb-1 h-16 overflow-hidden rounded-md3-xl bg-surface-container-high">
       <MiniPlayerContent {...props} />
     </View>
   );

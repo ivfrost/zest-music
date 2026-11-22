@@ -18,6 +18,7 @@ type RowProps = {
   rippleColor: string;
   trailing?: ReactNode;
   showChevron?: boolean;
+  onLayout?: ComponentProps<typeof Pressable>['onLayout'];
 };
 
 export function Row({
@@ -31,9 +32,11 @@ export function Row({
   rippleColor,
   trailing,
   showChevron = false,
+  onLayout,
 }: RowProps) {
   return (
     <Pressable
+      onLayout={onLayout}
       accessibilityRole="button"
       accessibilityLabel={subtitle ? `${title}, ${subtitle}` : title}
       onPress={onPress}

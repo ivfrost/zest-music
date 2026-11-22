@@ -114,7 +114,7 @@ export default function SettingsScreen() {
           <View className="gap-6">
             <Section title="Playback">
               <View className="rounded-md3-xl bg-surface-container p-4">
-                <Text className="text-body-large text-on-surface">
+                <Text className="text-body-large text-on-surface leading-tight">
                   Tapping the current song
                 </Text>
                 <Text className="mt-1 text-body-medium text-on-surface-variant opacity-70">

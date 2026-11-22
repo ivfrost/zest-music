@@ -1,3 +1,9 @@
+/** Stylized punctuation standing in for a letter: P!nk, Ke$ha, A$AP. */
+const PUNCTUATION_FOLDS: Record<string, string> = {
+  '!': 'i',
+  $: 's',
+};
+
 /** Latin letters whose accent is a stroke or ligature, not a combining mark. */
 const LATIN_FOLDS: Record<string, string> = {
   ł: 'l',
@@ -55,14 +61,19 @@ const CYRILLIC_FOLDS: Record<string, string> = {
 };
 
 /**
- * Folds text for search: case, accents, stroke letters and Cyrillic all collapse to
- * a comparable Latin form, so `lodz` matches `Łódź` and `kino` matches `Кино`.
+ * Folds text for search: case, accents, punctuation, stroke letters and Cyrillic
+ * all collapse to a comparable Latin form, so `lodz` matches `Łódź`, `kino`
+ * matches `Кино`, and `pink` matches `P!nk`.
  */
 export function foldForSearch(text: string): string {
   return text
     .toLowerCase()
     .normalize('NFD')
     .replace(/\p{Diacritic}/gu, '')
+    .replace(/[!$]/g, char => PUNCTUATION_FOLDS[char] ?? char)
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
     .replace(/[łøđðþßæœıħ]/g, char => LATIN_FOLDS[char] ?? char)
-    .replace(/[\u0400-\u04ff]/g, char => CYRILLIC_FOLDS[char] ?? char);
+    .replace(/[\u0400-\u04ff]/g, char => CYRILLIC_FOLDS[char] ?? char)
+    .replace(/\s+/g, ' ')
+    .trim();
 }

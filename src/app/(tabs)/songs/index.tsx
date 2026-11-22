@@ -26,12 +26,18 @@ import { useAudio } from '@/hooks/useAudio';
 import { useMaterialTheme } from '@/hooks/useMaterialTheme';
 import useMusicLocations from '@/hooks/useMusicLocation';
 import { setAlbumFilter, useAlbumFilter } from '@/lib/albumFilter';
+import { nameCollator } from '@/lib/collator';
 import { usePlayStats } from '@/lib/playStats';
 import { spacing } from '@/theme';
 import type { Song } from '@/types/songs';
 
 /** Caps ranked modes so they stay a selection instead of the whole library. */
 const RANKED_LIMIT = 50;
+
+// Fallback only; the first row reports its real height (font scaling moves it).
+// h-14 + py-2 at NativeWind's 14dp rem.
+const SONG_ROW_HEIGHT = 63;
+const SEPARATOR_HEIGHT = 1;
 
 const MODES = ['all', 'recent', 'most'] as const;
 type Mode = (typeof MODES)[number];
@@ -43,6 +49,30 @@ const MODE_LABELS: Record<Mode, string> = {
 };
 
 const MODE_OPTIONS = MODES.map(option => MODE_LABELS[option]);
+
+const SORTS = ['artistAsc', 'artistDesc', 'titleAsc', 'titleDesc'] as const;
+type Sort = (typeof SORTS)[number];
+
+const SORT_LABELS: Record<Sort, string> = {
+  artistAsc: 'Artist A–Z',
+  artistDesc: 'Artist Z–A',
+  titleAsc: 'Song A–Z',
+  titleDesc: 'Song Z–A',
+};
+
+const SORT_OPTIONS = SORTS.map(option => SORT_LABELS[option]);
+
+const FILTER_ICON = {
+  ios: 'line.3.horizontal.decrease',
+  android: 'filter_list',
+  web: 'filter_list',
+} as const;
+
+const SORT_ICON = {
+  ios: 'arrow.up.arrow.down',
+  android: 'sort',
+  web: 'sort',
+} as const;
 
 const SONG_ACTIONS = ['Add to playlist', 'Enqueue', 'Play Next', 'Play Now'];
 
@@ -69,6 +99,12 @@ export default function SongsTab() {
   const [pickerSong, setPickerSong] = useState<Song | null>(null);
   const [snackbar, setSnackbar] = useState<SnackbarMessage | null>(null);
   const [mode, setMode] = useState<Mode>('all');
+  const [sort, setSort] = useState<Sort>('artistAsc');
+  // Measured so the list height lands on whole rows on any device.
+  const [pageHeight, setPageHeight] = useState(0);
+  const [cardTop, setCardTop] = useState(0);
+  const [headerHeight, setHeaderHeight] = useState(0);
+  const [rowHeight, setRowHeight] = useState(0);
   // Session plays layered over the persisted counters.
   const played = usePlayStats();
   const albumId = useAlbumFilter();
@@ -161,11 +197,46 @@ export default function SongsTab() {
     return () => cancelAnimationFrame(frame);
   }, [listKey]);
 
-  const visibleSongs = useMemo(
-    () =>
-      albumId ? songs.filter(song => song.releaseId === albumId) : lists[mode],
-    [albumId, songs, lists, mode],
+  const visibleSongs = useMemo(() => {
+    const base = albumId
+      ? songs.filter(song => song.releaseId === albumId)
+      : lists[mode];
+    // Ranked modes carry their own order.
+    if (albumId === null && mode !== 'all') return base;
+
+    const isArtistSort = sort === 'artistAsc' || sort === 'artistDesc';
+    const direction = sort === 'artistDesc' || sort === 'titleDesc' ? -1 : 1;
+    const keyed = base.map(song => ({
+      song,
+      key: isArtistSort
+        ? getSongDisplayInfo(song, artistNameById).artist
+        : song.title,
+    }));
+    keyed.sort(
+      (a, b) =>
+        direction * nameCollator.compare(a.key, b.key) ||
+        nameCollator.compare(a.song.title, b.song.title),
+    );
+    return keyed.map(entry => entry.song);
+  }, [albumId, songs, lists, mode, sort, artistNameById]);
+
+  const countLabel =
+    albumId === null && mode !== 'all'
+      ? `${MODE_LABELS[mode]} · ${visibleSongs.length} songs`
+      : `${visibleSongs.length} songs`;
+
+  const showHeader = albumId === null || visibleSongs.length > 0;
+  // Rows ending flush with the bottom, no cut row or stray separator.
+  // onLayout reports heights rounded to physical pixels; rounding back keeps
+  // the accumulated per-row error from adding up to a visible row.
+  const rowPitch = Math.round(rowHeight || SONG_ROW_HEIGHT) + SEPARATOR_HEIGHT;
+  const listRows = Math.floor(
+    (pageHeight - cardTop - (showHeader ? headerHeight : 0) + SEPARATOR_HEIGHT) /
+      rowPitch,
   );
+  // Whole pitches, so the last row is never clipped; the card's bottom strip
+  // hides the separator that would sit at the edge.
+  const listMaxHeight = listRows > 0 ? listRows * rowPitch : undefined;
 
   const emptyMessage = albumId
     ? 'No songs in this album'
@@ -226,7 +297,10 @@ export default function SongsTab() {
 
   return (
     <TabScreen>
-      <View className="flex-1">
+      <View
+        className="flex-1"
+        onLayout={event => setPageHeight(event.nativeEvent.layout.height)}
+      >
         <View className="h-12 flex-row items-center gap-2">
           <Text
             accessibilityRole="header"
@@ -236,45 +310,69 @@ export default function SongsTab() {
             Songs
           </Text>
           <View className="flex-1" />
-          {albumChip ?? (
-            <FilterDropdown
-              label={MODE_LABELS[mode]}
-              options={MODE_OPTIONS}
-              selectedIndex={MODES.indexOf(mode)}
-              onSelect={index => {
-                const next = MODES[index];
-                if (next) setMode(next);
-              }}
-              accessibilityLabel="Filter songs"
-            />
-          )}
+          {albumChip}
           <TabMenuButton />
         </View>
 
-        <View className="mt-3 max-h-full shrink overflow-hidden rounded-md3-xl bg-surface-container-low">
-          <FlatList
-            ref={listRef}
-            data={visibleSongs}
-            keyExtractor={song => song.uri}
-            onScroll={handleScroll}
-            scrollEventThrottle={16}
-            onContentSizeChange={restoreOffset}
-            extraData={`${currentUri}|${isPlaying}|${isLoading}|${mode}|${albumId ?? ''}`}
-            className="shrink"
-            contentContainerStyle={{ paddingBottom: spacing.sm }}
-            ItemSeparatorComponent={renderSeparator}
-            ListHeaderComponent={
-              visibleSongs.length > 0 ? (
-                <View className="flex-row items-center py-1 pl-5 pr-2">
-                  <Text className="flex-1 text-body-medium text-on-surface-variant">
-                    {visibleSongs.length} songs
-                  </Text>
+        <View
+          className="mt-3 max-h-full shrink overflow-hidden rounded-md3-xl bg-surface-container-low"
+          onLayout={event => setCardTop(event.nativeEvent.layout.y)}
+        >
+          {/* Pinned outside the scroll (Android sticky headers are flaky); kept visible with no matches so the filter stays reachable. */}
+          {showHeader && (
+            <View
+              className="flex-row items-center py-1 pl-5 pr-2"
+              onLayout={event =>
+                setHeaderHeight(event.nativeEvent.layout.height)
+              }
+            >
+              <Text
+                numberOfLines={1}
+                className="flex-1 text-body-medium text-on-surface-variant"
+              >
+                {countLabel}
+              </Text>
+              {albumId === null && (
+                <View className="overflow-hidden rounded-md3-full">
+                  <FilterDropdown
+                    label={MODE_LABELS[mode]}
+                    options={MODE_OPTIONS}
+                    selectedIndex={MODES.indexOf(mode)}
+                    onSelect={index => {
+                      const next = MODES[index];
+                      if (next) setMode(next);
+                    }}
+                    accessibilityLabel={`Filter songs, ${MODE_LABELS[mode]}`}
+                    icon={FILTER_ICON}
+                  />
+                </View>
+              )}
+              {(albumId !== null || mode === 'all') && (
+                <View className="overflow-hidden rounded-md3-full">
+                  <FilterDropdown
+                    label={SORT_LABELS[sort]}
+                    options={SORT_OPTIONS}
+                    selectedIndex={SORTS.indexOf(sort)}
+                    onSelect={index => {
+                      const next = SORTS[index];
+                      if (next) setSort(next);
+                    }}
+                    accessibilityLabel={`Sort songs, ${SORT_LABELS[sort]}`}
+                    icon={SORT_ICON}
+                  />
+                </View>
+              )}
+              {visibleSongs.length > 0 && (
+                <>
                   <View className="overflow-hidden rounded-md3-full">
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={`Shuffle all, ${visibleSongs.length} songs`}
                       onPress={playAllShuffled}
-                      android_ripple={{ color: rippleColor, borderless: true }}
+                      android_ripple={{
+                        color: rippleColor,
+                        borderless: true,
+                      }}
                       className="h-12 w-12 items-center justify-center"
                     >
                       <SymbolView
@@ -293,7 +391,10 @@ export default function SongsTab() {
                       accessibilityRole="button"
                       accessibilityLabel={`Play all, ${visibleSongs.length} songs`}
                       onPress={playAll}
-                      android_ripple={{ color: rippleColor, borderless: true }}
+                      android_ripple={{
+                        color: rippleColor,
+                        borderless: true,
+                      }}
                       className="h-12 w-12 items-center justify-center"
                     >
                       <SymbolView
@@ -307,15 +408,28 @@ export default function SongsTab() {
                       />
                     </Pressable>
                   </View>
-                </View>
-              ) : undefined
-            }
+                </>
+              )}
+            </View>
+          )}
+          <FlatList
+            ref={listRef}
+            data={visibleSongs}
+            keyExtractor={song => song.uri}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            onContentSizeChange={restoreOffset}
+            extraData={`${currentUri}|${isPlaying}|${isLoading}|${mode}|${sort}|${albumId ?? ''}`}
+            className="shrink"
+            style={{ maxHeight: listMaxHeight }}
+            contentContainerStyle={{ paddingBottom: spacing.sm }}
+            ItemSeparatorComponent={renderSeparator}
             ListEmptyComponent={
               <Text className="p-6 text-on-surface-variant">
                 {emptyMessage}
               </Text>
             }
-            renderItem={({ item: song }) => {
+            renderItem={({ item: song, index }) => {
               const release = releaseById.get(song.releaseId);
               const { title: songTitle, artist: artistNames } =
                 getSongDisplayInfo(song, artistNameById);
@@ -340,9 +454,20 @@ export default function SongsTab() {
                     })
                   }
                   onLongPress={() => setActionSong(song)}
+                  onLayout={
+                    index === 0
+                      ? event => setRowHeight(event.nativeEvent.layout.height)
+                      : undefined
+                  }
                 />
               );
             }}
+          />
+          {/* Covers the separator at the viewport edge; sits over row padding only. */}
+          <View
+            pointerEvents="none"
+            className="absolute inset-x-0 bottom-0 bg-surface-container-low"
+            style={{ height: SEPARATOR_HEIGHT + 1 }}
           />
         </View>
       </View>
