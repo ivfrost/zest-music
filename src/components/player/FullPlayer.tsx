@@ -3,6 +3,7 @@ import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import {
   Fragment,
+  type ComponentRef,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -43,8 +44,10 @@ import type { RepeatMode } from '@/types/playback';
 type MaterialColors = ReturnType<typeof useMaterialTheme>['colors'];
 
 const QUEUE_HANDLE_HEIGHT = 68;
-const QUEUE_PEEK_HEIGHT = 280;
-type QueueLevel = 'closed' | 'peek' | 'full';
+// Fallback row height: 40dp artwork + py-2. A real row replaces it.
+const QUEUE_ROW_HEIGHT = 54;
+const QUEUE_PEEK_ROWS = 4;
+type QueueLevel = 'closed' | 'peek' | 'mid' | 'full';
 
 type QueueTrack = {
   queueIndex: number;
@@ -408,14 +411,35 @@ export function FullPlayer({
     QUEUE_HANDLE_HEIGHT,
     windowHeight - insets.top - insets.bottom,
   );
+  const [artistBottom, setArtistBottom] = useState(0);
+  const [queueRowHeight, setQueueRowHeight] = useState(0);
+  const rowHeight = queueRowHeight || QUEUE_ROW_HEIGHT;
+  // Peek shows whole rows and stays below the artist, never a clipped row.
+  const queuePeekRows = Math.min(
+    QUEUE_PEEK_ROWS,
+    Math.floor(
+      Math.max(
+        0,
+        windowHeight - insets.bottom - artistBottom - QUEUE_HANDLE_HEIGHT,
+      ) / rowHeight,
+    ),
+  );
+  const queuePeekHeight = QUEUE_HANDLE_HEIGHT + queuePeekRows * rowHeight;
+  // The mid stop sits halfway between peek and full, in whole rows.
+  const queueMidHeight =
+    queuePeekHeight +
+    Math.floor((queueSheetHeight - queuePeekHeight) / 2 / rowHeight) *
+      rowHeight;
   const queueOffsetFor = useCallback(
     (level: QueueLevel) =>
       level === 'full'
         ? 0
         : level === 'peek'
-          ? Math.max(0, queueSheetHeight - QUEUE_PEEK_HEIGHT)
-          : Math.max(0, queueSheetHeight - QUEUE_HANDLE_HEIGHT),
-    [queueSheetHeight],
+          ? Math.max(0, queueSheetHeight - queuePeekHeight)
+          : level === 'mid'
+            ? Math.max(0, queueSheetHeight - queueMidHeight)
+            : Math.max(0, queueSheetHeight - QUEUE_HANDLE_HEIGHT),
+    [queueSheetHeight, queuePeekHeight, queueMidHeight],
   );
   const queueSheetTranslateY = useSharedValue(queueOffsetFor('closed'));
   const queueDragStartY = useRef(0);
@@ -423,6 +447,7 @@ export function FullPlayer({
   // Gestures start from this ref instead.
   const queueSettledY = useRef(queueOffsetFor('closed'));
   const queueScrollY = useRef(0);
+  const artistRowRef = useRef<ComponentRef<typeof View>>(null);
   const coverOffset = useSharedValue(0);
   const coverSwipeInProgress = useSharedValue(false);
   const coverGestureStart = useSharedValue(0);
@@ -681,6 +706,7 @@ export function FullPlayer({
           );
           const snaps: { level: QueueLevel; y: number }[] = [
             { level: 'full', y: 0 },
+            { level: 'mid', y: queueOffsetFor('mid') },
             { level: 'peek', y: queueOffsetFor('peek') },
             { level: 'closed', y: closedY },
           ];
@@ -757,7 +783,16 @@ export function FullPlayer({
             {title}
           </Text>
           <View className="mt-1">
-            <View className="flex-row flex-wrap items-center">
+            <View
+              ref={artistRowRef}
+              className="flex-row flex-wrap items-center"
+              onLayout={() => {
+                // onLayout is parent-relative. The cap uses window space.
+                artistRowRef.current?.measureInWindow((_x, y, _w, height) => {
+                  if (height > 0) setArtistBottom(y + height);
+                });
+              }}
+            >
               {artistLinks.length > 0 ? (
                 artistLinks.map((linkedArtist, index) => (
                   <Fragment key={linkedArtist.id}>
@@ -1010,138 +1045,169 @@ export function FullPlayer({
           colors={colors}
         />
       </View>
-      <Animated.View
-        {...queuePanResponder.panHandlers}
-        style={[
-          {
-            position: 'absolute',
-            right: 0,
-            bottom: insets.bottom,
-            left: 0,
-            height: queueSheetHeight,
-            zIndex: 10,
-            elevation: 20,
-            overflow: 'hidden',
-            borderTopLeftRadius: 24,
-            borderTopRightRadius: 24,
-            backgroundColor: colors.surfaceContainer,
-          },
-          queueSheetAnimatedStyle,
-        ]}
+      <View
+        pointerEvents="box-none"
+        style={{
+          position: 'absolute',
+          top: 0,
+          right: 0,
+          bottom: insets.bottom,
+          left: 0,
+          zIndex: 10,
+          overflow: 'hidden',
+        }}
       >
-        <View style={{ height: QUEUE_HANDLE_HEIGHT }}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              isQueueOpen ? 'Hide upcoming queue' : 'Show upcoming queue'
-            }
-            accessibilityHint="Drag this handle up to expand the queue"
-            onPress={() => {
-              setIsQueueDragging(false);
-              setQueueSheetLevel(isQueueOpen ? 'closed' : 'peek');
-            }}
-            className="h-full flex-row items-center justify-center gap-2"
-            android_ripple={{ color: rippleColor }}
-          >
-            <SymbolView
-              name={
-                !isQueueOpen
-                  ? {
-                      ios: 'chevron.up',
-                      android: 'keyboard_arrow_up',
-                      web: 'keyboard_arrow_up',
-                    }
-                  : {
-                      ios: 'chevron.down',
-                      android: 'keyboard_arrow_down',
-                      web: 'keyboard_arrow_down',
-                    }
+        <Animated.View
+          {...queuePanResponder.panHandlers}
+          style={[
+            {
+              position: 'absolute',
+              right: 0,
+              bottom: 0,
+              left: 0,
+              height: queueSheetHeight,
+              elevation: 20,
+              overflow: 'hidden',
+              borderTopLeftRadius: 24,
+              borderTopRightRadius: 24,
+              backgroundColor: colors.surfaceContainer,
+            },
+            queueSheetAnimatedStyle,
+          ]}
+        >
+          <View style={{ height: QUEUE_HANDLE_HEIGHT }}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                isQueueOpen ? 'Hide upcoming queue' : 'Show upcoming queue'
               }
-              tintColor={colors.onSurfaceVariant}
-            />
-            <Text className="text-body-medium font-medium text-on-surface">
-              Up next
-            </Text>
-            <Text className="text-body-small text-on-surface-variant">
-              {queueTracks.length}
-            </Text>
-          </Pressable>
-        </View>
-        {isQueueOpen && queueTracks.length > 0 ? (
-          <FlatList
-            style={{ flex: 1 }}
-            data={queueTracks}
-            keyExtractor={track => `${track.uri}-${track.queueIndex}`}
-            initialNumToRender={12}
-            windowSize={7}
-            contentContainerStyle={{ paddingBottom: spacing.xl }}
-            scrollEventThrottle={16}
-            onScroll={event => {
-              queueScrollY.current = event.nativeEvent.contentOffset.y;
-            }}
-            renderItem={({ item: track }) => (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Play ${track.title} by ${track.artist}`}
-                onPress={() => {
-                  onSelectQueueTrack(track.queueIndex);
-                  setQueueSheetLevel('closed');
-                  setIsQueueDragging(false);
-                }}
-                unstable_pressDelay={80}
-                style={({ pressed }) =>
-                  pressed ? { opacity: 0.6 } : undefined
+              accessibilityHint="Drag this handle up to expand the queue"
+              onPress={() => {
+                setIsQueueDragging(false);
+                setQueueSheetLevel(isQueueOpen ? 'closed' : 'peek');
+              }}
+              className="h-full flex-row items-center justify-center gap-2"
+              android_ripple={{ color: rippleColor }}
+            >
+              <SymbolView
+                name={
+                  !isQueueOpen
+                    ? {
+                        ios: 'chevron.up',
+                        android: 'keyboard_arrow_up',
+                        web: 'keyboard_arrow_up',
+                      }
+                    : {
+                        ios: 'chevron.down',
+                        android: 'keyboard_arrow_down',
+                        web: 'keyboard_arrow_down',
+                      }
                 }
-                className="min-h-14 flex-row items-center gap-3 px-5 py-2"
-              >
-                {track.artworkUri ? (
-                  <Image
-                    source={{ uri: track.artworkUri }}
-                    style={{ width: 40, height: 40, borderRadius: radius.sm }}
-                    contentFit="cover"
-                    cachePolicy="memory-disk"
-                  />
-                ) : (
-                  <View className="h-10 w-10 items-center justify-center rounded-md3-sm bg-surface-container-high">
-                    <SymbolView
-                      name={{
-                        ios: 'music.note',
-                        android: 'music_note',
-                        web: 'music_note',
-                      }}
-                      size={ICON_SIZES.small}
-                      tintColor={colors.onSurfaceVariant}
+                tintColor={colors.onSurfaceVariant}
+              />
+              <Text className="text-body-medium font-medium text-on-surface">
+                Up next
+              </Text>
+              <Text className="text-body-small text-on-surface-variant">
+                {queueTracks.length}
+              </Text>
+            </Pressable>
+          </View>
+          {isQueueOpen && queueTracks.length > 0 ? (
+            <FlatList
+              style={{ flex: 1 }}
+              data={queueTracks}
+              keyExtractor={track => `${track.uri}-${track.queueIndex}`}
+              initialNumToRender={12}
+              windowSize={7}
+              contentContainerStyle={{ paddingBottom: spacing.xl }}
+              scrollEventThrottle={16}
+              onScroll={event => {
+                queueScrollY.current = event.nativeEvent.contentOffset.y;
+              }}
+              renderItem={({ item: track, index }) => (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Play ${track.title} by ${track.artist}`}
+                  onLayout={
+                    index === 0
+                      ? event =>
+                          setQueueRowHeight(event.nativeEvent.layout.height)
+                      : undefined
+                  }
+                  onPress={() => {
+                    onSelectQueueTrack(track.queueIndex);
+                    setQueueSheetLevel('closed');
+                    setIsQueueDragging(false);
+                  }}
+                  unstable_pressDelay={80}
+                  style={({ pressed }) =>
+                    pressed ? { opacity: 0.6 } : undefined
+                  }
+                  className="min-h-14 flex-row items-center gap-3 px-5 py-2"
+                >
+                  {track.artworkUri ? (
+                    <Image
+                      source={{ uri: track.artworkUri }}
+                      style={{ width: 40, height: 40, borderRadius: radius.sm }}
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
                     />
+                  ) : (
+                    <View className="h-10 w-10 items-center justify-center rounded-md3-sm bg-surface-container-high">
+                      <SymbolView
+                        name={{
+                          ios: 'music.note',
+                          android: 'music_note',
+                          web: 'music_note',
+                        }}
+                        size={ICON_SIZES.small}
+                        tintColor={colors.onSurfaceVariant}
+                      />
+                    </View>
+                  )}
+                  <View className="flex-1">
+                    <Text
+                      className="text-body-medium text-on-surface"
+                      numberOfLines={1}
+                    >
+                      {track.title}
+                    </Text>
+                    <Text
+                      className="mt-0.5 text-body-small leading-4 text-on-surface-variant opacity-70"
+                      numberOfLines={1}
+                    >
+                      {track.artist}
+                    </Text>
                   </View>
-                )}
-                <View className="flex-1">
-                  <Text
-                    className="text-body-medium text-on-surface"
-                    numberOfLines={1}
-                  >
-                    {track.title}
-                  </Text>
-                  <Text
-                    className="mt-0.5 text-body-small leading-4 text-on-surface-variant opacity-70"
-                    numberOfLines={1}
-                  >
-                    {track.artist}
-                  </Text>
-                </View>
-                {track.durationSeconds != null ? (
-                  <Text className="ml-3 text-body-small text-on-surface-variant opacity-70">
-                    {formatTime(track.durationSeconds)}
-                  </Text>
-                ) : null}
-              </Pressable>
-            )}
-          />
-        ) : isQueueOpen ? (
-          <Text className="px-5 py-4 text-body-medium text-on-surface-variant">
-            No upcoming tracks
-          </Text>
-        ) : null}
-      </Animated.View>
+                  {track.durationSeconds != null ? (
+                    <Text className="ml-3 text-body-small text-on-surface-variant opacity-70">
+                      {formatTime(track.durationSeconds)}
+                    </Text>
+                  ) : null}
+                </Pressable>
+              )}
+            />
+          ) : isQueueOpen ? (
+            <Text className="px-5 py-4 text-body-medium text-on-surface-variant">
+              No upcoming tracks
+            </Text>
+          ) : null}
+        </Animated.View>
+      </View>
+      {/* The nav bar sits below the clipped sheet, so fill it with the sheet color. */}
+      <View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          right: 0,
+          bottom: 0,
+          left: 0,
+          height: insets.bottom,
+          zIndex: 10,
+          backgroundColor: colors.surfaceContainer,
+        }}
+      />
     </SafeAreaView>
   );
 }
