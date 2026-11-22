@@ -1,9 +1,9 @@
-import { eq, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/expo-sqlite";
-import { useSQLiteContext } from "expo-sqlite";
-import { useEffect, useMemo } from "react";
-import { songs } from "@/db/schema";
-import { audioEngine } from "./audioEngine";
+import { eq, sql } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/expo-sqlite';
+import { useSQLiteContext } from 'expo-sqlite';
+import { useEffect, useMemo } from 'react';
+import { songs } from '@/db/schema';
+import { audioEngine } from './audioEngine';
 
 /**
  * Records each track's first actual playback in SQLite. Must be mounted inside
@@ -25,7 +25,7 @@ export function PlayStatsSync() {
             })
             .where(eq(songs.uri, uri));
         } catch (error) {
-          console.warn("[PlayStats] Could not record play", { uri, error });
+          console.warn('[PlayStats] Could not record play', { uri, error });
         }
       })();
     });

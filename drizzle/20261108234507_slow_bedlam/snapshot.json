@@ -2,9 +2,7 @@
   "version": "7",
   "dialect": "sqlite",
   "id": "97dba97e-ecf3-47d0-a438-fad52ced3b30",
-  "prevIds": [
-    "751fc49e-8e76-41f9-908a-1f93b93b289e"
-  ],
+  "prevIds": ["751fc49e-8e76-41f9-908a-1f93b93b289e"],
   "ddl": [
     {
       "name": "artists",
@@ -263,13 +261,9 @@
     {
       "table": "release_artists",
       "name": "fk_release_artists_release_id_releases_id_fk",
-      "columns": [
-        "release_id"
-      ],
+      "columns": ["release_id"],
       "tableTo": "releases",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -278,13 +272,9 @@
     {
       "table": "release_artists",
       "name": "fk_release_artists_artist_id_artists_id_fk",
-      "columns": [
-        "artist_id"
-      ],
+      "columns": ["artist_id"],
       "tableTo": "artists",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -293,13 +283,9 @@
     {
       "table": "song_playlists",
       "name": "fk_song_playlists_song_id_songs_id_fk",
-      "columns": [
-        "song_id"
-      ],
+      "columns": ["song_id"],
       "tableTo": "songs",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -308,13 +294,9 @@
     {
       "table": "song_playlists",
       "name": "fk_song_playlists_playlist_id_playlists_id_fk",
-      "columns": [
-        "playlist_id"
-      ],
+      "columns": ["playlist_id"],
       "tableTo": "playlists",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -323,13 +305,9 @@
     {
       "table": "songs",
       "name": "fk_songs_release_id_releases_id_fk",
-      "columns": [
-        "release_id"
-      ],
+      "columns": ["release_id"],
       "tableTo": "releases",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
@@ -338,56 +316,42 @@
     {
       "table": "release_artists",
       "name": "release_artists_pk",
-      "columns": [
-        "release_id",
-        "artist_id"
-      ],
+      "columns": ["release_id", "artist_id"],
       "nameExplicit": false,
       "entityType": "pks"
     },
     {
       "table": "song_playlists",
       "name": "song_playlists_pk",
-      "columns": [
-        "song_id",
-        "playlist_id"
-      ],
+      "columns": ["song_id", "playlist_id"],
       "nameExplicit": false,
       "entityType": "pks"
     },
     {
       "table": "artists",
       "name": "artists_pk",
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "entityType": "pks"
     },
     {
       "table": "playlists",
       "name": "playlists_pk",
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "entityType": "pks"
     },
     {
       "table": "releases",
       "name": "releases_pk",
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "entityType": "pks"
     },
     {
       "table": "songs",
       "name": "songs_pk",
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "entityType": "pks"
     }

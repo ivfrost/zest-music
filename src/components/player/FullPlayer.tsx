@@ -217,9 +217,7 @@ function SeekBar({
     if (fineScrubbingRef.current) return;
     clearHoldTimer();
     holdTimer.current = setTimeout(() => {
-      const seconds = Math.round(
-        latestFraction.current * durationRef.current,
-      );
+      const seconds = Math.round(latestFraction.current * durationRef.current);
       const fraction = seconds / Math.max(1, durationRef.current);
       fineCenterSeconds.current = seconds;
       fineStartFraction.current = fraction;
@@ -264,8 +262,7 @@ function SeekBar({
             fineScrubbingRef.current
               ? fineStartFraction.current +
                   (gesture.dx / Math.max(1, widthRef.current)) *
-                    (fineSpanRef.current /
-                      Math.max(1, durationRef.current))
+                    (fineSpanRef.current / Math.max(1, durationRef.current))
               : startFraction.current +
                   gesture.dx / Math.max(1, widthRef.current),
           );
@@ -903,7 +900,11 @@ export function FullPlayer({
           numberOfLines={1}
           className="flex-1 text-center text-body-small font-medium text-on-surface-variant"
         >
-          {queueLabel ? (isShuffling ? `Shuffled · ${queueLabel}` : queueLabel) : ''}
+          {queueLabel
+            ? isShuffling
+              ? `Shuffled · ${queueLabel}`
+              : queueLabel
+            : ''}
         </Text>
         <View className="h-12 w-12 items-center justify-center">
           {onAddToPlaylist ? (

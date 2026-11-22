@@ -71,10 +71,7 @@ export function SearchOverlay({ initialScope, onClose }: SearchOverlayProps) {
   const songPlayCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const song of songs) {
-      counts.set(
-        song.uri,
-        song.playCount + (played.increments[song.uri] ?? 0),
-      );
+      counts.set(song.uri, song.playCount + (played.increments[song.uri] ?? 0));
     }
     return counts;
   }, [songs, played.increments]);
@@ -84,8 +81,7 @@ export function SearchOverlay({ initialScope, onClose }: SearchOverlayProps) {
     for (const song of songs) {
       counts.set(
         song.releaseId,
-        (counts.get(song.releaseId) ?? 0) +
-          (songPlayCounts.get(song.uri) ?? 0),
+        (counts.get(song.releaseId) ?? 0) + (songPlayCounts.get(song.uri) ?? 0),
       );
     }
     return counts;
@@ -122,8 +118,7 @@ export function SearchOverlay({ initialScope, onClose }: SearchOverlayProps) {
       .filter(artist => foldForSearch(artist.name).includes(normalized))
       .sort(
         (a, b) =>
-          (artistPlayCounts.get(b.id) ?? 0) -
-          (artistPlayCounts.get(a.id) ?? 0),
+          (artistPlayCounts.get(b.id) ?? 0) - (artistPlayCounts.get(a.id) ?? 0),
       );
   }, [artists, normalized, artistPlayCounts]);
 
@@ -133,15 +128,14 @@ export function SearchOverlay({ initialScope, onClose }: SearchOverlayProps) {
       .filter(release => foldForSearch(release.title).includes(normalized))
       .sort(
         (a, b) =>
-          (albumPlayCounts.get(b.id) ?? 0) -
-          (albumPlayCounts.get(a.id) ?? 0),
+          (albumPlayCounts.get(b.id) ?? 0) - (albumPlayCounts.get(a.id) ?? 0),
       );
   }, [releases, normalized, albumPlayCounts]);
 
   const { preferences } = usePreferences();
-  const [visibleArtistIds, setVisibleArtistIds] = useState<
-    ReadonlySet<string>
-  >(new Set());
+  const [visibleArtistIds, setVisibleArtistIds] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 0 }).current;
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: { item: Artist }[] }) => {

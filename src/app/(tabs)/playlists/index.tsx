@@ -45,8 +45,9 @@ export default function PlaylistTab() {
   const renderSeparator = useRowSeparator(dividerColor, 88);
   const [isCreating, setIsCreating] = useState(false);
   const [isDescending, setIsDescending] = useState(false);
-  const [actionPlaylist, setActionPlaylist] =
-    useState<PlaylistSummary | null>(null);
+  const [actionPlaylist, setActionPlaylist] = useState<PlaylistSummary | null>(
+    null,
+  );
   const [snackbar, setSnackbar] = useState<SnackbarMessage | null>(null);
   const sortedPlaylists = useMemo(
     () =>

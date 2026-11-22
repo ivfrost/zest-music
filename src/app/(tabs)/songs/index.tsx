@@ -297,83 +297,83 @@ export default function SongsTab() {
         actions={
           <>
             {albumId === null && (
+              <View className="overflow-hidden rounded-md3-full">
+                <FilterDropdown
+                  label={MODE_LABELS[mode]}
+                  options={MODE_OPTIONS}
+                  selectedIndex={MODES.indexOf(mode)}
+                  onSelect={index => {
+                    const next = MODES[index];
+                    if (next) setMode(next);
+                  }}
+                  accessibilityLabel={`Filter songs, ${MODE_LABELS[mode]}`}
+                  icon={FILTER_ICON}
+                />
+              </View>
+            )}
+            {(albumId !== null || mode === 'all') && (
+              <View className="overflow-hidden rounded-md3-full">
+                <FilterDropdown
+                  label={SORT_LABELS[sort]}
+                  options={SORT_OPTIONS}
+                  selectedIndex={SORTS.indexOf(sort)}
+                  onSelect={index => {
+                    const next = SORTS[index];
+                    if (next) setSort(next);
+                  }}
+                  accessibilityLabel={`Sort songs, ${SORT_LABELS[sort]}`}
+                  icon={SORT_ICON}
+                />
+              </View>
+            )}
+            {visibleSongs.length > 0 && (
+              <>
                 <View className="overflow-hidden rounded-md3-full">
-                  <FilterDropdown
-                    label={MODE_LABELS[mode]}
-                    options={MODE_OPTIONS}
-                    selectedIndex={MODES.indexOf(mode)}
-                    onSelect={index => {
-                      const next = MODES[index];
-                      if (next) setMode(next);
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Shuffle all, ${visibleSongs.length} songs`}
+                    onPress={playAllShuffled}
+                    android_ripple={{
+                      color: rippleColor,
+                      borderless: true,
                     }}
-                    accessibilityLabel={`Filter songs, ${MODE_LABELS[mode]}`}
-                    icon={FILTER_ICON}
-                  />
+                    className="h-12 w-12 items-center justify-center"
+                  >
+                    <SymbolView
+                      name={{
+                        ios: 'shuffle',
+                        android: 'shuffle',
+                        web: 'shuffle',
+                      }}
+                      size={20}
+                      tintColor={colors.onSurfaceVariant}
+                    />
+                  </Pressable>
                 </View>
-              )}
-              {(albumId !== null || mode === 'all') && (
                 <View className="overflow-hidden rounded-md3-full">
-                  <FilterDropdown
-                    label={SORT_LABELS[sort]}
-                    options={SORT_OPTIONS}
-                    selectedIndex={SORTS.indexOf(sort)}
-                    onSelect={index => {
-                      const next = SORTS[index];
-                      if (next) setSort(next);
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Play all, ${visibleSongs.length} songs`}
+                    onPress={playAll}
+                    android_ripple={{
+                      color: rippleColor,
+                      borderless: true,
                     }}
-                    accessibilityLabel={`Sort songs, ${SORT_LABELS[sort]}`}
-                    icon={SORT_ICON}
-                  />
+                    className="h-12 w-12 items-center justify-center"
+                  >
+                    <SymbolView
+                      name={{
+                        ios: 'play.fill',
+                        android: 'play_arrow',
+                        web: 'play_arrow',
+                      }}
+                      size={24}
+                      tintColor={colors.onSurfaceVariant}
+                    />
+                  </Pressable>
                 </View>
-              )}
-              {visibleSongs.length > 0 && (
-                <>
-                  <View className="overflow-hidden rounded-md3-full">
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`Shuffle all, ${visibleSongs.length} songs`}
-                      onPress={playAllShuffled}
-                      android_ripple={{
-                        color: rippleColor,
-                        borderless: true,
-                      }}
-                      className="h-12 w-12 items-center justify-center"
-                    >
-                      <SymbolView
-                        name={{
-                          ios: 'shuffle',
-                          android: 'shuffle',
-                          web: 'shuffle',
-                        }}
-                        size={20}
-                        tintColor={colors.onSurfaceVariant}
-                      />
-                    </Pressable>
-                  </View>
-                  <View className="overflow-hidden rounded-md3-full">
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`Play all, ${visibleSongs.length} songs`}
-                      onPress={playAll}
-                      android_ripple={{
-                        color: rippleColor,
-                        borderless: true,
-                      }}
-                      className="h-12 w-12 items-center justify-center"
-                    >
-                      <SymbolView
-                        name={{
-                          ios: 'play.fill',
-                          android: 'play_arrow',
-                          web: 'play_arrow',
-                        }}
-                        size={24}
-                        tintColor={colors.onSurfaceVariant}
-                      />
-                    </Pressable>
-                  </View>
-                </>
-              )}
+              </>
+            )}
           </>
         }
       >

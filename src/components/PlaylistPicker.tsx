@@ -54,9 +54,7 @@ export function PlaylistPicker({
     try {
       const added = await addSongToPlaylist(db, songId, playlist.id);
       finish(
-        added
-          ? `Added to ${playlist.title}`
-          : `Already in ${playlist.title}`,
+        added ? `Added to ${playlist.title}` : `Already in ${playlist.title}`,
       );
     } catch (error) {
       console.warn('[Playlists] Could not add song', error);
