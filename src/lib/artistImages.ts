@@ -432,7 +432,10 @@ async function materializeArtistImage(
     const thumbFile = new File(directory, `${artistId}-thumb.jpg`);
 
     if (!heroFile.exists) {
-      await File.downloadFileAsync(artistImageUrl(image, 'hero'), heroFile);
+      // Wikimedia rejects requests without a descriptive User-Agent (403).
+      await File.downloadFileAsync(artistImageUrl(image, 'hero'), heroFile, {
+        headers: { 'User-Agent': USER_AGENT },
+      });
     }
 
     if (!thumbFile.exists) {
