@@ -163,16 +163,19 @@ function SeekBar({
       : 0;
   // Ticks are offsets from the reference second, so they stay symmetric.
   const fineTicks: { offset: number; label: string }[] = [];
+  const fineSecondTicks: number[] = [];
   if (fineScrubbing && fineSpanSeconds > 0) {
-    // The outermost ticks stay one step inside, so their labels are not clipped.
-    const steps = Math.floor(
-      (fineSpanSeconds / 2 - FINE_TICK_SECONDS) / FINE_TICK_SECONDS,
-    );
-    for (let step = -steps; step <= steps; step += 1) {
-      if (step === 0) continue;
-      const delta = step * FINE_TICK_SECONDS;
+    const half = Math.floor(fineSpanSeconds / 2);
+    for (let delta = -half; delta <= half; delta += 1) {
+      if (delta === 0) continue;
       const time = fineCenterSeconds.current + delta;
       if (time < 0 || time > durationSeconds) continue;
+      if (delta % FINE_TICK_SECONDS !== 0) {
+        fineSecondTicks.push(0.5 + delta / fineSpanSeconds);
+        continue;
+      }
+      // The edge ticks have no room for a label.
+      if (Math.abs(delta) >= fineSpanSeconds / 2) continue;
       fineTicks.push({
         offset: 0.5 + delta / fineSpanSeconds,
         label: `${delta > 0 ? '+' : ''}${delta}`,
@@ -236,7 +239,7 @@ function SeekBar({
       setFineScrubbing(true);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setDraftFraction(fraction);
-    }, 400);
+    }, 300);
   };
 
   const tickFor = (fraction: number) =>
@@ -421,6 +424,20 @@ function SeekBar({
               backgroundColor: colors.surfaceContainerHigh,
             }}
           >
+            {fineSecondTicks.map(offset => (
+              <View
+                key={offset}
+                className="absolute"
+                style={{
+                  left: `${offset * 100}%`,
+                  top: 3,
+                  width: 1,
+                  height: 3,
+                  backgroundColor: colors.onSurfaceVariant,
+                  opacity: 0.35,
+                }}
+              />
+            ))}
             {fineTicks.map(tick => (
               <Fragment key={tick.label}>
                 <View
