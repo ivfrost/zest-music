@@ -45,6 +45,7 @@ import type { RepeatMode } from '@/types/playback';
 type MaterialColors = ReturnType<typeof useMaterialTheme>['colors'];
 
 const QUEUE_HANDLE_HEIGHT = 68;
+const PLAYER_HEADER_HEIGHT = 48 + spacing.sm * 2;
 // Fallback row height: 40dp artwork + py-2. A real row replaces it.
 const QUEUE_ROW_HEIGHT = 54;
 const QUEUE_PEEK_ROWS = 4;
@@ -121,20 +122,16 @@ function SeekBar({
   onSeek: (seconds: number) => void;
   colors: MaterialColors;
 }) {
-  const [trackWidth, setTrackWidth] = useState(0);
   const [draftFraction, setDraftFraction] = useState<number | null>(null);
   const widthRef = useRef(0);
   const durationRef = useRef(durationSeconds);
   const onSeekRef = useRef(onSeek);
   const startFraction = useRef(0);
   const latestFraction = useRef(0);
-  const latestGestureDx = useRef(0);
   const fineStartFraction = useRef(0);
   const fineCenterSeconds = useRef(0);
-  const fineStartGestureDx = useRef(0);
   const fineScrubbingRef = useRef(false);
   const [fineScrubbing, setFineScrubbing] = useState(false);
-  const [dragging, setDragging] = useState(false);
   const pendingSeekFraction = useRef<number | null>(null);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingSeekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -143,13 +140,6 @@ function SeekBar({
       ? Math.min(1, Math.max(0, positionSeconds / durationSeconds))
       : 0;
   const displayedFraction = draftFraction ?? progress;
-  const displayedRef = useRef(displayedFraction);
-  displayedRef.current = displayedFraction;
-  const barFreezeFraction = useRef(0);
-  // The bar holds the pre-press position until lift.
-  const barFraction = dragging
-    ? barFreezeFraction.current
-    : displayedFraction;
   const fineSpanSeconds = Math.min(FINE_WINDOW_SECONDS, durationSeconds);
   const fineSpanRef = useRef(fineSpanSeconds);
   fineSpanRef.current = fineSpanSeconds;
@@ -188,7 +178,6 @@ function SeekBar({
   }
   const lastTickRef = useRef<number | null>(null);
 
-  widthRef.current = trackWidth;
   durationRef.current = durationSeconds;
   onSeekRef.current = onSeek;
 
@@ -228,17 +217,13 @@ function SeekBar({
     if (fineScrubbingRef.current) return;
     clearHoldTimer();
     holdTimer.current = setTimeout(() => {
-      // A hold without a drag anchors on the seek position from the press.
-      const moved = Math.abs(latestGestureDx.current) > 8;
       const seconds = Math.round(
-        (moved ? latestFraction.current : barFreezeFraction.current) *
-          durationRef.current,
+        latestFraction.current * durationRef.current,
       );
       const fraction = seconds / Math.max(1, durationRef.current);
       fineCenterSeconds.current = seconds;
       fineStartFraction.current = fraction;
       latestFraction.current = fraction;
-      fineStartGestureDx.current = latestGestureDx.current;
       fineScrubbingRef.current = true;
       setFineScrubbing(true);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -263,27 +248,22 @@ function SeekBar({
           pendingSeekFraction.current = null;
           if (pendingSeekTimer.current) clearTimeout(pendingSeekTimer.current);
           pendingSeekTimer.current = null;
-          barFreezeFraction.current = displayedRef.current;
           const fraction = clampFraction(
             event.nativeEvent.locationX / Math.max(1, widthRef.current),
           );
           startFraction.current = fraction;
           latestFraction.current = fraction;
           lastTickRef.current = tickFor(fraction);
-          latestGestureDx.current = 0;
           fineScrubbingRef.current = false;
           setFineScrubbing(false);
-          setDragging(true);
           setDraftFraction(fraction);
           scheduleFineScrub();
         },
         onPanResponderMove: (_event, gesture) => {
-          latestGestureDx.current = gesture.dx;
           const rawFraction = clampFraction(
             fineScrubbingRef.current
               ? fineStartFraction.current +
-                  ((gesture.dx - fineStartGestureDx.current) /
-                    Math.max(1, widthRef.current)) *
+                  (gesture.dx / Math.max(1, widthRef.current)) *
                     (fineSpanRef.current /
                       Math.max(1, durationRef.current))
               : startFraction.current +
@@ -309,7 +289,9 @@ function SeekBar({
             Haptics.selectionAsync();
           }
           setDraftFraction(fraction);
-          scheduleFineScrub();
+          if (!fineScrubbingRef.current && Math.abs(gesture.dx) > 3) {
+            clearHoldTimer();
+          }
         },
         onPanResponderRelease: _event => {
           clearHoldTimer();
@@ -324,7 +306,6 @@ function SeekBar({
           onSeekRef.current(fraction * durationRef.current);
           fineScrubbingRef.current = false;
           setFineScrubbing(false);
-          setDragging(false);
           if (pendingSeekTimer.current) clearTimeout(pendingSeekTimer.current);
           pendingSeekTimer.current = setTimeout(() => {
             pendingSeekFraction.current = null;
@@ -336,7 +317,6 @@ function SeekBar({
           clearHoldTimer();
           fineScrubbingRef.current = false;
           setFineScrubbing(false);
-          setDragging(false);
           pendingSeekFraction.current = null;
           if (pendingSeekTimer.current) clearTimeout(pendingSeekTimer.current);
           pendingSeekTimer.current = null;
@@ -382,9 +362,7 @@ function SeekBar({
           if (event.nativeEvent.actionName === 'decrement') seekBy(-10);
         }}
         onLayout={event => {
-          const width = event.nativeEvent.layout.width;
-          widthRef.current = width;
-          setTrackWidth(width);
+          widthRef.current = event.nativeEvent.layout.width;
         }}
         className="h-8 justify-end"
       >
@@ -401,7 +379,7 @@ function SeekBar({
           <View
             className="h-full rounded-md3-full"
             style={{
-              width: `${barFraction * 100}%`,
+              width: `${displayedFraction * 100}%`,
               backgroundColor: colors.primary,
             }}
           />
@@ -411,7 +389,7 @@ function SeekBar({
           className="absolute h-3.5 w-3.5 rounded-md3-full"
           style={{
             top: '50%',
-            left: `${barFraction * 100}%`,
+            left: `${displayedFraction * 100}%`,
             transform: [{ translateY: -6 }],
             marginLeft: -7,
             backgroundColor: colors.primary,
@@ -556,7 +534,6 @@ export function FullPlayer({
   const [queueSheetLevel, setQueueSheetLevel] = useState<QueueLevel>('closed');
   const [isQueueDragging, setIsQueueDragging] = useState(false);
   const [isCoverTransitioning, setIsCoverTransitioning] = useState(false);
-  const [headerHeight, setHeaderHeight] = useState(0);
   // The list only mounts while the sheet is open, so a collapsed sheet can
   // never show a row even if a transform fails to apply.
   const isQueueOpen = queueSheetLevel !== 'closed' || isQueueDragging;
@@ -901,8 +878,8 @@ export function FullPlayer({
   return (
     <SafeAreaView edges={['top', 'bottom']} className="flex-1">
       <View
-        onLayout={event => setHeaderHeight(event.nativeEvent.layout.height)}
-        className="flex-row items-center overflow-hidden px-4 py-2"
+        style={{ height: PLAYER_HEADER_HEIGHT }}
+        className="flex-row items-center overflow-hidden px-4"
       >
         <Pressable
           accessibilityRole="button"
@@ -946,7 +923,7 @@ export function FullPlayer({
 
       <View
         className="flex-1 items-center justify-center px-8 py-6"
-        style={{ paddingBottom: headerHeight + spacing.lg }}
+        style={{ paddingBottom: PLAYER_HEADER_HEIGHT + spacing.lg }}
       >
         <GestureDetector gesture={coverPanGesture}>
           <Animated.View
