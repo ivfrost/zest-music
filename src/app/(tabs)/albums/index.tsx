@@ -8,7 +8,12 @@ import {
   View,
 } from 'react-native';
 import { getSongDisplayInfo } from '@/audio/trackHelpers';
-import { FilterDropdown } from '@/components/FilterDropdown';
+import {
+  FilterDropdown,
+  FILTER_ICON,
+  SORT_ICON,
+} from '@/components/FilterDropdown';
+import { ListCard } from '@/components/ListCard';
 import { Row } from '@/components/Row';
 import { useRowSeparator } from '@/components/RowSeparator';
 import { TabMenuButton } from '@/components/TabMenuButton';
@@ -33,6 +38,8 @@ const MODE_LABELS: Record<Mode, string> = {
 
 const MODE_OPTIONS = MODES.map(option => MODE_LABELS[option]);
 
+const SORT_OPTIONS = ['Name A–Z', 'Name Z–A'];
+
 type AlbumEntry = {
   release: ReleaseSummary;
   artist: string;
@@ -51,6 +58,7 @@ export default function AlbumsTab() {
   const { colors, rippleColor, dividerColor } = useMaterialTheme();
   const renderSeparator = useRowSeparator(dividerColor, 88);
   const [mode, setMode] = useState<Mode>('all');
+  const [isDescending, setIsDescending] = useState(false);
   const played = usePlayStats();
 
   const lists = useMemo(() => {
@@ -89,10 +97,11 @@ export default function AlbumsTab() {
       ];
     });
 
+    const direction = isDescending ? -1 : 1;
     const all = [...rows].sort(
       (a, b) =>
-        nameCollator.compare(a.artist, b.artist) ||
-        nameCollator.compare(a.release.title, b.release.title),
+        direction * nameCollator.compare(a.release.title, b.release.title) ||
+        nameCollator.compare(a.artist, b.artist),
     );
     const recent = rows
       .filter(entry => entry.lastPlayedAt > 0)
@@ -104,7 +113,7 @@ export default function AlbumsTab() {
       );
 
     return { all, recent, most };
-  }, [releases, songs, artistNameById, played]);
+  }, [releases, songs, artistNameById, played, isDescending]);
 
   const listRef = useRef<FlatList<AlbumEntry>>(null);
   const offsetsRef = useRef<Record<string, number>>({});
@@ -138,32 +147,58 @@ export default function AlbumsTab() {
           ? 'Loading albums…'
           : 'No albums found';
 
+  const countLabel = `${mode === 'all' ? '' : `${MODE_LABELS[mode]} · `}${
+    visibleAlbums.length
+  } ${visibleAlbums.length === 1 ? 'album' : 'albums'}`;
+
   return (
     <TabScreen>
-      <View className="flex-1">
-        <View className="h-12 flex-row items-center gap-2">
-          <Text
-            accessibilityRole="header"
-            numberOfLines={1}
-            className="text-title-large font-medium text-on-surface"
-          >
-            Albums
-          </Text>
-          <View className="flex-1" />
-          <FilterDropdown
-            label={MODE_LABELS[mode]}
-            options={MODE_OPTIONS}
-            selectedIndex={MODES.indexOf(mode)}
-            onSelect={index => {
-              const next = MODES[index];
-              if (next) setMode(next);
-            }}
-            accessibilityLabel="Filter albums"
-          />
-          <TabMenuButton />
-        </View>
-
-        <View className="mt-3 max-h-full shrink overflow-hidden rounded-md3-xl bg-surface-container-low">
+      <ListCard
+        titleRow={
+          <View className="h-12 flex-row items-center gap-2">
+            <Text
+              accessibilityRole="header"
+              numberOfLines={1}
+              className="text-title-large font-medium text-on-surface"
+            >
+              Albums
+            </Text>
+            <View className="flex-1" />
+            <TabMenuButton />
+          </View>
+        }
+        label={countLabel}
+        actions={
+          <>
+            <View className="overflow-hidden rounded-md3-full">
+              <FilterDropdown
+                label={MODE_LABELS[mode]}
+                options={MODE_OPTIONS}
+                selectedIndex={MODES.indexOf(mode)}
+                onSelect={index => {
+                  const next = MODES[index];
+                  if (next) setMode(next);
+                }}
+                accessibilityLabel={`Filter albums, ${MODE_LABELS[mode]}`}
+                icon={FILTER_ICON}
+              />
+            </View>
+            {mode === 'all' && (
+              <View className="overflow-hidden rounded-md3-full">
+                <FilterDropdown
+                  label={SORT_OPTIONS[isDescending ? 1 : 0] ?? ''}
+                  options={SORT_OPTIONS}
+                  selectedIndex={isDescending ? 1 : 0}
+                  onSelect={index => setIsDescending(index === 1)}
+                  accessibilityLabel={`Sort albums, ${SORT_OPTIONS[isDescending ? 1 : 0]}`}
+                  icon={SORT_ICON}
+                />
+              </View>
+            )}
+          </>
+        }
+      >
+        {({ listMaxHeight, onRowLayout }) => (
           <FlatList
             ref={listRef}
             data={visibleAlbums}
@@ -173,17 +208,15 @@ export default function AlbumsTab() {
             onContentSizeChange={restoreOffset}
             extraData={mode}
             className="shrink"
-            contentContainerStyle={{
-              paddingTop: spacing.xs,
-              paddingBottom: spacing.sm,
-            }}
+            style={{ maxHeight: listMaxHeight }}
+            contentContainerStyle={{ paddingBottom: spacing.sm }}
             ItemSeparatorComponent={renderSeparator}
             ListEmptyComponent={
               <Text className="p-6 text-on-surface-variant">
                 {emptyMessage}
               </Text>
             }
-            renderItem={({ item }) => (
+            renderItem={({ item, index }) => (
               <Row
                 title={item.release.title}
                 subtitle={`${item.artist} · ${item.songCount} ${
@@ -198,11 +231,12 @@ export default function AlbumsTab() {
                   setAlbumFilter(item.release.id);
                   router.navigate('/songs');
                 }}
+                onLayout={index === 0 ? onRowLayout : undefined}
               />
             )}
           />
-        </View>
-      </View>
+        )}
+      </ListCard>
     </TabScreen>
   );
 }

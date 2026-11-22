@@ -35,6 +35,7 @@ import {
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
+import { FilterDropdown } from '@/components/FilterDropdown';
 import { ICON_SIZES } from '@/hooks/materialPalette';
 import { useAudioProgress } from '@/hooks/useAudio';
 import type { useMaterialTheme } from '@/hooks/useMaterialTheme';
@@ -72,6 +73,7 @@ type FullPlayerProps = {
   /** `id` is null when the playing file is no longer in the library. */
   album: { id: string | null; title: string } | null;
   artworkUri: string | null;
+  queueLabel: string;
   trackKey: string | null;
   artworkSize: number;
   isPlaying: boolean;
@@ -85,6 +87,8 @@ type FullPlayerProps = {
   onToggle: () => void;
   onNext: () => void | Promise<void>;
   onSeek: (seconds: number) => void;
+  onCollapse: () => void;
+  onAddToPlaylist?: () => void;
   onOpenArtist: (artistId: string) => void;
   onOpenAlbum: (releaseId: string) => void;
   queueTracks: QueueTrack[];
@@ -526,6 +530,7 @@ export function FullPlayer({
   artistLinks,
   album,
   artworkUri,
+  queueLabel,
   trackKey,
   artworkSize,
   isPlaying,
@@ -539,6 +544,8 @@ export function FullPlayer({
   onToggle,
   onNext,
   onSeek,
+  onCollapse,
+  onAddToPlaylist,
   onOpenArtist,
   onOpenAlbum,
   queueTracks,
@@ -549,6 +556,7 @@ export function FullPlayer({
   const [queueSheetLevel, setQueueSheetLevel] = useState<QueueLevel>('closed');
   const [isQueueDragging, setIsQueueDragging] = useState(false);
   const [isCoverTransitioning, setIsCoverTransitioning] = useState(false);
+  const [headerHeight, setHeaderHeight] = useState(0);
   // The list only mounts while the sheet is open, so a collapsed sheet can
   // never show a row even if a transform fails to apply.
   const isQueueOpen = queueSheetLevel !== 'closed' || isQueueDragging;
@@ -892,7 +900,54 @@ export function FullPlayer({
 
   return (
     <SafeAreaView edges={['top', 'bottom']} className="flex-1">
-      <View className="flex-1 items-center justify-center px-8 py-6">
+      <View
+        onLayout={event => setHeaderHeight(event.nativeEvent.layout.height)}
+        className="flex-row items-center overflow-hidden px-4 py-2"
+      >
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Collapse player"
+          accessibilityHint="Swiping down also collapses the player"
+          onPress={onCollapse}
+          style={({ pressed }) => (pressed ? { opacity: 0.7 } : undefined)}
+          className="h-12 w-12 items-center justify-center"
+        >
+          <SymbolView
+            name={{
+              ios: 'chevron.down',
+              android: 'keyboard_arrow_down',
+              web: 'keyboard_arrow_down',
+            }}
+            size={24}
+            tintColor={colors.onSurface}
+          />
+        </Pressable>
+        <Text
+          numberOfLines={1}
+          className="flex-1 text-center text-body-small font-medium text-on-surface-variant"
+        >
+          {queueLabel ? (isShuffling ? `Shuffled · ${queueLabel}` : queueLabel) : ''}
+        </Text>
+        <View className="h-12 w-12 items-center justify-center">
+          {onAddToPlaylist ? (
+            <FilterDropdown
+              label="More"
+              options={['Add to playlist']}
+              selectedIndex={-1}
+              onSelect={onAddToPlaylist}
+              accessibilityLabel="Player actions"
+              icon={{ ios: 'ellipsis', android: 'more_vert', web: 'more_vert' }}
+              iconColor={colors.onSurface}
+              itemChevron
+            />
+          ) : null}
+        </View>
+      </View>
+
+      <View
+        className="flex-1 items-center justify-center px-8 py-6"
+        style={{ paddingBottom: headerHeight + spacing.lg }}
+      >
         <GestureDetector gesture={coverPanGesture}>
           <Animated.View
             className="overflow-hidden rounded-md3-xl bg-surface-container-high"

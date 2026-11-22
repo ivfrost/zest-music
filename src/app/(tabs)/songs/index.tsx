@@ -15,7 +15,12 @@ import {
   getSongDisplayInfo,
 } from '@/audio/trackHelpers';
 import { ActionSheet } from '@/components/ActionSheet';
-import { FilterDropdown } from '@/components/FilterDropdown';
+import {
+  FilterDropdown,
+  FILTER_ICON,
+  SORT_ICON,
+} from '@/components/FilterDropdown';
+import { ListCard } from '@/components/ListCard';
 import { PlaylistPicker } from '@/components/PlaylistPicker';
 import { useRowSeparator } from '@/components/RowSeparator';
 import { Snackbar, type SnackbarMessage } from '@/components/Snackbar';
@@ -33,11 +38,6 @@ import type { Song } from '@/types/songs';
 
 /** Caps ranked modes so they stay a selection instead of the whole library. */
 const RANKED_LIMIT = 50;
-
-// Fallback only; the first row reports its real height (font scaling moves it).
-// h-14 + py-2 at NativeWind's 14dp rem.
-const SONG_ROW_HEIGHT = 63;
-const SEPARATOR_HEIGHT = 1;
 
 const MODES = ['all', 'recent', 'most'] as const;
 type Mode = (typeof MODES)[number];
@@ -61,18 +61,6 @@ const SORT_LABELS: Record<Sort, string> = {
 };
 
 const SORT_OPTIONS = SORTS.map(option => SORT_LABELS[option]);
-
-const FILTER_ICON = {
-  ios: 'line.3.horizontal.decrease',
-  android: 'filter_list',
-  web: 'filter_list',
-} as const;
-
-const SORT_ICON = {
-  ios: 'arrow.up.arrow.down',
-  android: 'sort',
-  web: 'sort',
-} as const;
 
 const SONG_ACTIONS = ['Add to playlist', 'Enqueue', 'Play Next', 'Play Now'];
 
@@ -100,11 +88,6 @@ export default function SongsTab() {
   const [snackbar, setSnackbar] = useState<SnackbarMessage | null>(null);
   const [mode, setMode] = useState<Mode>('all');
   const [sort, setSort] = useState<Sort>('artistAsc');
-  // Measured so the list height lands on whole rows on any device.
-  const [pageHeight, setPageHeight] = useState(0);
-  const [cardTop, setCardTop] = useState(0);
-  const [headerHeight, setHeaderHeight] = useState(0);
-  const [rowHeight, setRowHeight] = useState(0);
   // Session plays layered over the persisted counters.
   const played = usePlayStats();
   const albumId = useAlbumFilter();
@@ -225,18 +208,13 @@ export default function SongsTab() {
       ? `${MODE_LABELS[mode]} · ${visibleSongs.length} songs`
       : `${visibleSongs.length} songs`;
 
+  const queueLabel = albumId
+    ? `Album: ${albumTitle ?? 'Unknown Album'}`
+    : mode === 'all'
+      ? 'All songs'
+      : MODE_LABELS[mode];
+
   const showHeader = albumId === null || visibleSongs.length > 0;
-  // Rows ending flush with the bottom, no cut row or stray separator.
-  // onLayout reports heights rounded to physical pixels; rounding back keeps
-  // the accumulated per-row error from adding up to a visible row.
-  const rowPitch = Math.round(rowHeight || SONG_ROW_HEIGHT) + SEPARATOR_HEIGHT;
-  const listRows = Math.floor(
-    (pageHeight - cardTop - (showHeader ? headerHeight : 0) + SEPARATOR_HEIGHT) /
-      rowPitch,
-  );
-  // Whole pitches, so the last row is never clipped; the card's bottom strip
-  // hides the separator that would sit at the edge.
-  const listMaxHeight = listRows > 0 ? listRows * rowPitch : undefined;
 
   const emptyMessage = albumId
     ? 'No songs in this album'
@@ -253,6 +231,7 @@ export default function SongsTab() {
     if (!firstSong) return;
     void playTrack(firstSong.uri, {
       currentRoute,
+      label: queueLabel,
       queue: createQueueFromSongList(visibleSongs, firstSong.uri),
     });
   };
@@ -264,6 +243,7 @@ export default function SongsTab() {
       firstSong.uri,
       {
         currentRoute,
+        label: queueLabel,
         queue: createQueueFromSongList(visibleSongs, firstSong.uri),
       },
       { shuffle: true },
@@ -297,42 +277,26 @@ export default function SongsTab() {
 
   return (
     <TabScreen>
-      <View
-        className="flex-1"
-        onLayout={event => setPageHeight(event.nativeEvent.layout.height)}
-      >
-        <View className="h-12 flex-row items-center gap-2">
-          <Text
-            accessibilityRole="header"
-            numberOfLines={1}
-            className="text-title-large font-medium text-on-surface"
-          >
-            Songs
-          </Text>
-          <View className="flex-1" />
-          {albumChip}
-          <TabMenuButton />
-        </View>
-
-        <View
-          className="mt-3 max-h-full shrink overflow-hidden rounded-md3-xl bg-surface-container-low"
-          onLayout={event => setCardTop(event.nativeEvent.layout.y)}
-        >
-          {/* Pinned outside the scroll (Android sticky headers are flaky); kept visible with no matches so the filter stays reachable. */}
-          {showHeader && (
-            <View
-              className="flex-row items-center py-1 pl-5 pr-2"
-              onLayout={event =>
-                setHeaderHeight(event.nativeEvent.layout.height)
-              }
+      <ListCard
+        titleRow={
+          <View className="h-12 flex-row items-center gap-2">
+            <Text
+              accessibilityRole="header"
+              numberOfLines={1}
+              className="text-title-large font-medium text-on-surface"
             >
-              <Text
-                numberOfLines={1}
-                className="flex-1 text-body-medium text-on-surface-variant"
-              >
-                {countLabel}
-              </Text>
-              {albumId === null && (
+              Songs
+            </Text>
+            <View className="flex-1" />
+            {albumChip}
+            <TabMenuButton />
+          </View>
+        }
+        label={countLabel}
+        showHeader={showHeader}
+        actions={
+          <>
+            {albumId === null && (
                 <View className="overflow-hidden rounded-md3-full">
                   <FilterDropdown
                     label={MODE_LABELS[mode]}
@@ -410,8 +374,10 @@ export default function SongsTab() {
                   </View>
                 </>
               )}
-            </View>
-          )}
+          </>
+        }
+      >
+        {({ listMaxHeight, onRowLayout }) => (
           <FlatList
             ref={listRef}
             data={visibleSongs}
@@ -450,27 +416,18 @@ export default function SongsTab() {
                   onPress={() =>
                     void playTrack(song.uri, {
                       currentRoute,
+                      label: queueLabel,
                       queue: createQueueFromSongList(visibleSongs, song.uri),
                     })
                   }
                   onLongPress={() => setActionSong(song)}
-                  onLayout={
-                    index === 0
-                      ? event => setRowHeight(event.nativeEvent.layout.height)
-                      : undefined
-                  }
+                  onLayout={index === 0 ? onRowLayout : undefined}
                 />
               );
             }}
           />
-          {/* Covers the separator at the viewport edge; sits over row padding only. */}
-          <View
-            pointerEvents="none"
-            className="absolute inset-x-0 bottom-0 bg-surface-container-low"
-            style={{ height: SEPARATOR_HEIGHT + 1 }}
-          />
-        </View>
-      </View>
+        )}
+      </ListCard>
 
       <ActionSheet
         visible={actionSong !== null}

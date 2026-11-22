@@ -1,3 +1,4 @@
+import { SymbolView } from 'expo-symbols';
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
   Animated,
@@ -29,6 +30,7 @@ type ActionSheetProps = {
   title?: string;
   message?: string;
   options: readonly string[];
+  itemChevron?: boolean;
   onSelect: (index: number) => void;
   onCancel: () => void;
 };
@@ -38,10 +40,11 @@ export function ActionSheet({
   title,
   message,
   options,
+  itemChevron,
   onSelect,
   onCancel,
 }: ActionSheetProps) {
-  const { rippleColor } = useMaterialTheme();
+  const { colors, rippleColor } = useMaterialTheme();
   const insets = useSafeAreaInsets();
   const { setIsTabBarHidden } = useContext(TabBarContext);
   const [isMounted, setIsMounted] = useState(false);
@@ -190,7 +193,22 @@ export function ActionSheet({
                 unstable_pressDelay={0}
                 className="h-14 justify-center px-5"
               >
-                <Text className="text-body-large text-on-surface">{option}</Text>
+                <View className="flex-row items-center justify-between">
+                  <Text className="text-body-large text-on-surface">
+                    {option}
+                  </Text>
+                  {itemChevron ? (
+                    <SymbolView
+                      name={{
+                        ios: 'chevron.right',
+                        android: 'chevron_right',
+                        web: 'chevron_right',
+                      }}
+                      size={20}
+                      tintColor={colors.onSurfaceVariant}
+                    />
+                  ) : null}
+                </View>
               </Pressable>
             ))}
           </View>

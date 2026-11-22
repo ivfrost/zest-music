@@ -53,5 +53,6 @@ const styles = StyleSheet.create({
     right: 16,
     bottom: MINI_PLAYER_CLEARANCE,
     alignItems: 'center',
+    zIndex: 200,
   },
 });

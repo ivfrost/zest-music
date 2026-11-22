@@ -34,6 +34,7 @@ const PREFETCH_BEHIND = 1;
 
 export interface PlaybackContext {
   currentRoute: string;
+  label: string;
   queue: readonly string[];
 }
 
@@ -60,6 +61,7 @@ interface AudioReactContextValue {
   playNext: () => Promise<void>;
   queueUris: readonly string[];
   queueIndex: number;
+  queueLabel: string;
   playQueueTrackAt: (index: number) => Promise<void>;
   isShuffling: boolean;
   repeatMode: RepeatMode;
@@ -193,6 +195,7 @@ export function AudioProvider({ children }: PropsWithChildren) {
     }
     void savePlaybackSession({
       currentRoute: next.currentRoute,
+      label: next.label,
       queue: [...next.queue],
       order: [...next.order],
       currentIndex: next.currentIndex,
@@ -242,6 +245,7 @@ export function AudioProvider({ children }: PropsWithChildren) {
 
         playbackQueue.current = {
           currentRoute: session.currentRoute,
+          label: session.label,
           queue: session.queue,
           order,
           currentIndex,
@@ -501,6 +505,7 @@ export function AudioProvider({ children }: PropsWithChildren) {
       const firstUri = order[0] ?? uri;
       commitQueue({
         currentRoute: context.currentRoute,
+        label: context.label,
         queue,
         repeatMode: 'off',
         hasRepeatedCurrentTrack: false,
@@ -590,6 +595,7 @@ export function AudioProvider({ children }: PropsWithChildren) {
         // Nothing is playing, so there is nothing to insert after: start it.
         commitQueue({
           currentRoute,
+          label: '',
           queue: [uri],
           order: [uri],
           currentIndex: 0,
@@ -761,6 +767,7 @@ export function AudioProvider({ children }: PropsWithChildren) {
 
   const queueUris = playbackQueue.current?.order ?? EMPTY_URIS;
   const queueIndex = playbackQueue.current?.currentIndex ?? -1;
+  const queueLabel = playbackQueue.current?.label ?? '';
 
   const contextValue = useMemo<AudioReactContextValue>(
     () => ({
@@ -774,6 +781,7 @@ export function AudioProvider({ children }: PropsWithChildren) {
       playNext,
       queueUris,
       queueIndex,
+      queueLabel,
       playQueueTrackAt,
       queueEnqueue,
       queuePlayNext,
@@ -797,6 +805,7 @@ export function AudioProvider({ children }: PropsWithChildren) {
       playNext,
       queueUris,
       queueIndex,
+      queueLabel,
       playQueueTrackAt,
       queueEnqueue,
       queuePlayNext,

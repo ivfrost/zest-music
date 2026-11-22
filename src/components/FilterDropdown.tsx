@@ -19,12 +19,26 @@ type FilterDropdownProps = {
   accessibilityLabel: string;
   /** Replaces the label with a compact 48dp icon trigger. */
   icon?: SymbolViewProps['name'];
+  iconColor?: string;
+  itemChevron?: boolean;
 };
 
 const CHEVRON = {
   ios: 'chevron.down',
   android: 'arrow_drop_down',
   web: 'arrow_drop_down',
+} as const;
+
+export const FILTER_ICON = {
+  ios: 'line.3.horizontal.decrease',
+  android: 'filter_list',
+  web: 'filter_list',
+} as const;
+
+export const SORT_ICON = {
+  ios: 'arrow.up.arrow.down',
+  android: 'sort_by_alpha',
+  web: 'sort_by_alpha',
 } as const;
 
 const pressedStyle = ({ pressed }: { pressed: boolean }) =>
@@ -38,8 +52,10 @@ export function FilterDropdown({
   onSelect,
   accessibilityLabel,
   icon,
+  iconColor,
+  itemChevron,
 }: FilterDropdownProps) {
-  const { colors } = useMaterialTheme();
+  const { colors, rippleColor } = useMaterialTheme();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isSheetOpen, setIsSheetOpen] = useState(false);
 
@@ -48,7 +64,11 @@ export function FilterDropdown({
     : 'h-9 flex-row items-center gap-1 pl-3 pr-2';
 
   const content = icon ? (
-    <SymbolView name={icon} size={20} tintColor={colors.onSurfaceVariant} />
+    <SymbolView
+      name={icon}
+      size={24}
+      tintColor={iconColor ?? colors.onSurfaceVariant}
+    />
   ) : (
     <>
       <Text
@@ -73,6 +93,7 @@ export function FilterDropdown({
           accessibilityLabel={accessibilityLabel}
           onPress={() => setIsSheetOpen(true)}
           style={pressedStyle}
+          android_ripple={{ color: rippleColor, borderless: true }}
           className={triggerClass}
         >
           {content}
@@ -81,6 +102,7 @@ export function FilterDropdown({
           visible={isSheetOpen}
           title={accessibilityLabel}
           options={options}
+          itemChevron={itemChevron}
           onSelect={index => {
             setIsSheetOpen(false);
             onSelect(index);
@@ -105,6 +127,7 @@ export function FilterDropdown({
                 accessibilityLabel={accessibilityLabel}
                 onPress={() => setIsExpanded(true)}
                 style={pressedStyle}
+                android_ripple={{ color: rippleColor, borderless: true }}
                 className={triggerClass}
               >
                 {content}
@@ -123,6 +146,21 @@ export function FilterDropdown({
                 <DropdownMenuItem.Text>
                   <ComposeText>{option}</ComposeText>
                 </DropdownMenuItem.Text>
+                {itemChevron ? (
+                  <DropdownMenuItem.TrailingIcon>
+                    <RNHostView matchContents>
+                      <SymbolView
+                        name={{
+                          ios: 'chevron.right',
+                          android: 'chevron_right',
+                          web: 'chevron_right',
+                        }}
+                        size={20}
+                        tintColor={colors.onSurfaceVariant}
+                      />
+                    </RNHostView>
+                  </DropdownMenuItem.TrailingIcon>
+                ) : null}
               </DropdownMenuItem>
             ))}
           </DropdownMenu.Items>

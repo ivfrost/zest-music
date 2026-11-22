@@ -145,6 +145,9 @@ export default function PlaylistDetailScreen() {
               onPress={() =>
                 void playTrack(song.uri, {
                   currentRoute,
+                  label: playlist
+                    ? `Playlist: ${playlist.title}`
+                    : 'Playlist',
                   queue: createQueueFromSongList(playlistSongs, song.uri),
                 })
               }

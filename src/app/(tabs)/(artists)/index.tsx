@@ -1,8 +1,13 @@
 import { router } from 'expo-router';
 import { useMemo, useRef, useState } from 'react';
-import { FlatList, Pressable, Text, View } from 'react-native';
+import { FlatList, Text, View } from 'react-native';
 import { ArtistRow } from '@/components/ArtistRow';
-import { FilterDropdown } from '@/components/FilterDropdown';
+import {
+  FilterDropdown,
+  FILTER_ICON,
+  SORT_ICON,
+} from '@/components/FilterDropdown';
+import { ListCard } from '@/components/ListCard';
 import { useRowSeparator } from '@/components/RowSeparator';
 import { TabMenuButton } from '@/components/TabMenuButton';
 import { TabScreen } from '@/components/TabScreen';
@@ -28,6 +33,8 @@ const MODE_LABELS: Record<Mode, string> = {
 };
 
 const MODE_OPTIONS = MODES.map(option => MODE_LABELS[option]);
+
+const SORT_OPTIONS = ['Name A–Z', 'Name Z–A'];
 
 export default function ArtistTab() {
   const { artists, songs, isScanning: isLibraryLoading } = useMusicLocations();
@@ -63,6 +70,7 @@ export default function ArtistTab() {
     return stats;
   }, [songs, played]);
   const [mode, setMode] = useState<Mode>('all');
+  const [isDescending, setIsDescending] = useState(false);
   const lists = useMemo(() => {
     const recent = artists
       .filter(
@@ -85,8 +93,11 @@ export default function ArtistTab() {
           nameCollator.compare(a.name, b.name)
         );
       });
-    return { all: artists, recent, most };
-  }, [artists, artistPlaybackById]);
+    const all = isDescending
+      ? [...artists].sort((a, b) => nameCollator.compare(b.name, a.name))
+      : artists;
+    return { all, recent, most };
+  }, [artists, artistPlaybackById, isDescending]);
   const visibleArtists = lists[mode];
   const emptyMessage =
     mode === 'all'
@@ -112,43 +123,66 @@ export default function ArtistTab() {
   const renderSeparator = useRowSeparator(dividerColor, 88);
 
   const listRef = useRef<FlatList<Artist>>(null);
+  const countLabel = `${mode === 'all' ? '' : `${MODE_LABELS[mode]} · `}${
+    visibleArtists.length
+  } ${visibleArtists.length === 1 ? 'artist' : 'artists'}`;
 
   return (
     <TabScreen>
-      <View className="flex-1">
-        <View className="h-12 flex-row items-center gap-2">
-          <Text
-            accessibilityRole="header"
-            numberOfLines={1}
-            className="text-title-large font-medium text-on-surface"
-          >
-            Artists
-          </Text>
-          <View className="flex-1" />
-          <FilterDropdown
-            label={MODE_LABELS[mode]}
-            options={MODE_OPTIONS}
-            selectedIndex={MODES.indexOf(mode)}
-            onSelect={index => {
-              const next = MODES[index];
-              if (next) setMode(next);
-            }}
-            accessibilityLabel="Filter artists"
-          />
-          <TabMenuButton />
-        </View>
-
-        <View className="mt-3 max-h-full shrink overflow-hidden rounded-md3-xl bg-surface-container-low">
+      <ListCard
+        titleRow={
+          <View className="h-12 flex-row items-center gap-2">
+            <Text
+              accessibilityRole="header"
+              numberOfLines={1}
+              className="text-title-large font-medium text-on-surface"
+            >
+              Artists
+            </Text>
+            <View className="flex-1" />
+            <TabMenuButton />
+          </View>
+        }
+        label={countLabel}
+        actions={
+          <>
+            <View className="overflow-hidden rounded-md3-full">
+              <FilterDropdown
+                label={MODE_LABELS[mode]}
+                options={MODE_OPTIONS}
+                selectedIndex={MODES.indexOf(mode)}
+                onSelect={index => {
+                  const next = MODES[index];
+                  if (next) setMode(next);
+                }}
+                accessibilityLabel={`Filter artists, ${MODE_LABELS[mode]}`}
+                icon={FILTER_ICON}
+              />
+            </View>
+            {mode === 'all' && (
+              <View className="overflow-hidden rounded-md3-full">
+                <FilterDropdown
+                  label={SORT_OPTIONS[isDescending ? 1 : 0] ?? ''}
+                  options={SORT_OPTIONS}
+                  selectedIndex={isDescending ? 1 : 0}
+                  onSelect={index => setIsDescending(index === 1)}
+                  accessibilityLabel={`Sort artists, ${SORT_OPTIONS[isDescending ? 1 : 0]}`}
+                  icon={SORT_ICON}
+                />
+              </View>
+            )}
+          </>
+        }
+      >
+        {({ listMaxHeight, onRowLayout }) => (
           <FlatList
             ref={listRef}
             data={visibleArtists}
             keyExtractor={artist => artist.id}
             extraData={`${currentUri}|${isPlaying}|${isLoading}`}
             className="shrink"
-            contentContainerStyle={{
-              paddingTop: spacing.xs,
-              paddingBottom: spacing.sm,
-            }}
+            style={{ maxHeight: listMaxHeight }}
+            contentContainerStyle={{ paddingBottom: spacing.sm }}
             ItemSeparatorComponent={renderSeparator}
             onViewableItemsChanged={onViewableItemsChanged}
             viewabilityConfig={viewabilityConfig}
@@ -157,7 +191,7 @@ export default function ArtistTab() {
                 {emptyMessage}
               </Text>
             }
-            renderItem={({ item: artist }) => {
+            renderItem={({ item: artist, index }) => {
               const songCount = songCountByArtist.get(artist.id) ?? 0;
               const albumCount = artist.releaseIds.length;
               const artistImage = artistImages.get(artist.id);
@@ -180,12 +214,13 @@ export default function ArtistTab() {
                       params: { id: artist.id },
                     })
                   }
+                  onLayout={index === 0 ? onRowLayout : undefined}
                 />
               );
             }}
           />
-        </View>
-      </View>
+        )}
+      </ListCard>
     </TabScreen>
   );
 }

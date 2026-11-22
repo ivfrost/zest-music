@@ -297,6 +297,7 @@ export function SearchOverlay({ initialScope, onClose }: SearchOverlayProps) {
                                 firstSong.uri,
                                 {
                                   currentRoute,
+                                  label: 'Search results',
                                   queue: createQueueFromSongList(
                                     songResults,
                                     firstSong.uri,
@@ -333,6 +334,7 @@ export function SearchOverlay({ initialScope, onClose }: SearchOverlayProps) {
                             closeAnd(() => {
                               void playTrack(firstSong.uri, {
                                 currentRoute,
+                                label: 'Search results',
                                 queue: createQueueFromSongList(
                                   songResults,
                                   firstSong.uri,
@@ -391,6 +393,7 @@ export function SearchOverlay({ initialScope, onClose }: SearchOverlayProps) {
                         closeAnd(() => {
                           void playTrack(song.uri, {
                             currentRoute,
+                            label: 'Search results',
                             queue: createQueueFromSongList(
                               songResults,
                               song.uri,

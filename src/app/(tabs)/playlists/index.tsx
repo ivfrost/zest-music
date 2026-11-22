@@ -1,9 +1,11 @@
 import { router } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Alert, FlatList, Pressable, Text, View } from 'react-native';
 import { ActionSheet } from '@/components/ActionSheet';
 import { CreatePlaylistDialog } from '@/components/CreatePlaylistDialog';
+import { FilterDropdown, SORT_ICON } from '@/components/FilterDropdown';
+import { ListCard } from '@/components/ListCard';
 import { Row } from '@/components/Row';
 import { useRowSeparator } from '@/components/RowSeparator';
 import { Snackbar, type SnackbarMessage } from '@/components/Snackbar';
@@ -11,6 +13,7 @@ import { TabMenuButton } from '@/components/TabMenuButton';
 import { TabScreen } from '@/components/TabScreen';
 import { deletePlaylist } from '@/db/library';
 import { useMaterialTheme } from '@/hooks/useMaterialTheme';
+import { nameCollator } from '@/lib/collator';
 import {
   type PlaylistSummary,
   useLibraryDatabase,
@@ -33,15 +36,26 @@ const QUEUE_ICON = {
 const songLabel = (count: number) =>
   count === 1 ? '1 song' : `${count} songs`;
 
+const SORT_OPTIONS = ['Name A–Z', 'Name Z–A'];
+
 export default function PlaylistTab() {
   const db = useLibraryDatabase();
   const playlists = usePlaylists();
   const { colors, rippleColor, dividerColor } = useMaterialTheme();
   const renderSeparator = useRowSeparator(dividerColor, 88);
   const [isCreating, setIsCreating] = useState(false);
+  const [isDescending, setIsDescending] = useState(false);
   const [actionPlaylist, setActionPlaylist] =
     useState<PlaylistSummary | null>(null);
   const [snackbar, setSnackbar] = useState<SnackbarMessage | null>(null);
+  const sortedPlaylists = useMemo(
+    () =>
+      [...playlists].sort(
+        (a, b) =>
+          (isDescending ? -1 : 1) * nameCollator.compare(a.title, b.title),
+      ),
+    [playlists, isDescending],
+  );
 
   const openPlaylist = (playlistId: string) => {
     // The dev server regenerates the typed-routes file. The cast keeps
@@ -87,69 +101,93 @@ export default function PlaylistTab() {
 
   return (
     <TabScreen>
-      <View className="flex-row items-center justify-between">
-        <Text
-          accessibilityRole="header"
-          numberOfLines={1}
-          className="text-title-large font-medium text-on-surface"
-        >
-          Playlists
-        </Text>
-        <View className="flex-row items-center">
-          <View className="h-12 w-12 overflow-hidden rounded-md3-full">
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="New playlist"
-              onPress={() => setIsCreating(true)}
-              android_ripple={{ color: rippleColor, borderless: true }}
-              className="h-full w-full items-center justify-center"
+      <ListCard
+        titleRow={
+          <View className="h-12 flex-row items-center gap-2">
+            <Text
+              accessibilityRole="header"
+              numberOfLines={1}
+              className="text-title-large font-medium text-on-surface"
             >
-              <SymbolView
-                name={PLUS_ICON}
-                size={24}
-                tintColor={colors.onSurface}
-              />
-            </Pressable>
-          </View>
-          <TabMenuButton />
-        </View>
-      </View>
-
-      <FlatList
-        data={playlists}
-        keyExtractor={playlist => playlist.id}
-        ItemSeparatorComponent={renderSeparator}
-        contentContainerStyle={{ paddingTop: spacing.md }}
-        ListEmptyComponent={
-          <View className="px-4 pt-2">
-            <Text className="text-body-large text-on-surface-variant">
-              No playlists yet
+              Playlists
             </Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Create playlist"
-              onPress={() => setIsCreating(true)}
-              className="mt-2 self-start"
-            >
-              <Text className="text-label-large text-primary">
-                Create playlist
-              </Text>
-            </Pressable>
+            <View className="flex-1" />
+            <TabMenuButton />
           </View>
         }
-        renderItem={({ item: playlist }) => (
-          <Row
-            title={playlist.title}
-            subtitle={songLabel(playlist.songCount)}
-            icon={QUEUE_ICON}
-            iconColor={colors.onSurfaceVariant}
-            rippleColor={rippleColor}
-            onPress={() => openPlaylist(playlist.id)}
-            onLongPress={() => setActionPlaylist(playlist)}
-            showChevron
+        label={`${playlists.length} ${
+          playlists.length === 1 ? 'playlist' : 'playlists'
+        }`}
+        actions={
+          <>
+            <View className="overflow-hidden rounded-md3-full">
+              <FilterDropdown
+                label={SORT_OPTIONS[isDescending ? 1 : 0] ?? ''}
+                options={SORT_OPTIONS}
+                selectedIndex={isDescending ? 1 : 0}
+                onSelect={index => setIsDescending(index === 1)}
+                accessibilityLabel={`Sort playlists, ${SORT_OPTIONS[isDescending ? 1 : 0]}`}
+                icon={SORT_ICON}
+              />
+            </View>
+            <View className="overflow-hidden rounded-md3-full">
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="New playlist"
+                onPress={() => setIsCreating(true)}
+                android_ripple={{ color: rippleColor, borderless: true }}
+                className="h-12 w-12 items-center justify-center"
+              >
+                <SymbolView
+                  name={PLUS_ICON}
+                  size={24}
+                  tintColor={colors.onSurfaceVariant}
+                />
+              </Pressable>
+            </View>
+          </>
+        }
+      >
+        {({ listMaxHeight, onRowLayout }) => (
+          <FlatList
+            data={sortedPlaylists}
+            keyExtractor={playlist => playlist.id}
+            ItemSeparatorComponent={renderSeparator}
+            style={{ maxHeight: listMaxHeight }}
+            contentContainerStyle={{ paddingBottom: spacing.sm }}
+            ListEmptyComponent={
+              <View className="px-4 pt-2">
+                <Text className="text-body-large text-on-surface-variant">
+                  No playlists yet
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Create playlist"
+                  onPress={() => setIsCreating(true)}
+                  className="mt-2 self-start"
+                >
+                  <Text className="text-label-large text-primary">
+                    Create playlist
+                  </Text>
+                </Pressable>
+              </View>
+            }
+            renderItem={({ item: playlist, index }) => (
+              <Row
+                title={playlist.title}
+                subtitle={songLabel(playlist.songCount)}
+                icon={QUEUE_ICON}
+                iconColor={colors.onSurfaceVariant}
+                rippleColor={rippleColor}
+                onPress={() => openPlaylist(playlist.id)}
+                onLongPress={() => setActionPlaylist(playlist)}
+                showChevron
+                onLayout={index === 0 ? onRowLayout : undefined}
+              />
+            )}
           />
         )}
-      />
+      </ListCard>
 
       <ActionSheet
         visible={actionPlaylist !== null}

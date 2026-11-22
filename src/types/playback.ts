@@ -9,6 +9,7 @@ export const PLAYBACK_STORAGE_VERSION = 1;
 export const PlaybackSessionSchema = z.object({
   version: z.literal(PLAYBACK_STORAGE_VERSION),
   currentRoute: z.string(),
+  label: z.string().default(''),
   queue: z.array(z.string()).min(1),
   order: z.array(z.string()).min(1),
   currentIndex: z.number().int().nonnegative(),

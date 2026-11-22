@@ -1,3 +1,4 @@
+import type { ComponentProps } from 'react';
 import { Row } from './Row';
 
 type ArtistRowProps = {
@@ -7,6 +8,7 @@ type ArtistRowProps = {
   onPress: () => void;
   iconColor: string;
   rippleColor: string;
+  onLayout?: ComponentProps<typeof Row>['onLayout'];
 };
 
 export function ArtistRow({
@@ -16,6 +18,7 @@ export function ArtistRow({
   onPress,
   iconColor,
   rippleColor,
+  onLayout,
 }: ArtistRowProps) {
   return (
     <Row
@@ -27,6 +30,7 @@ export function ArtistRow({
       iconColor={iconColor}
       rippleColor={rippleColor}
       showChevron
+      onLayout={onLayout}
     />
   );
 }

@@ -20,9 +20,11 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
 import { getCurrentTrackInfo, getSongDisplayInfo } from '@/audio/trackHelpers';
+import { PlaylistPicker } from '@/components/PlaylistPicker';
 import { FullPlayer } from '@/components/player/FullPlayer';
 import { MiniPlayer, MiniPlayerContent } from '@/components/player/MiniPlayer';
 import { SearchOverlay } from '@/components/SearchOverlay';
+import { Snackbar, type SnackbarMessage } from '@/components/Snackbar';
 import { TabBarContext } from '@/context/TabBarContext';
 import { useAudio } from '@/hooks/useAudio';
 import { useMaterialTheme } from '@/hooks/useMaterialTheme';
@@ -39,6 +41,8 @@ export default function TabsLayout() {
   const [isTabBarHidden, setIsTabBarHidden] = useState(false);
   const [isPlayerExpanded, setIsPlayerExpanded] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [playlistSongId, setPlaylistSongId] = useState<string | null>(null);
+  const [snackbar, setSnackbar] = useState<SnackbarMessage | null>(null);
   const [layoutHeight, setLayoutHeight] = useState(0);
   const pathname = usePathname();
   const { vars: themeVars, colors, rippleColor } = useMaterialTheme();
@@ -58,6 +62,7 @@ export default function TabsLayout() {
     playNext,
     queueUris,
     queueIndex,
+    queueLabel,
     playQueueTrackAt,
   } = useAudio();
   const { songs, artistNameById, releaseById, removedNowPlaying } =
@@ -125,24 +130,25 @@ export default function TabsLayout() {
   const { width: windowWidth } = useWindowDimensions();
   const expandedProgress = useSharedValue(0);
 
+  const closePlayer = useCallback(() => {
+    expandedProgress.value = withTiming(0, { duration: 220 }, finished => {
+      if (finished) scheduleOnRN(setIsPlayerExpanded, false);
+    });
+  }, [expandedProgress]);
   const openArtist = useCallback(
     (artistId: string) => {
-      expandedProgress.value = withTiming(0, { duration: 220 }, finished => {
-        if (finished) scheduleOnRN(setIsPlayerExpanded, false);
-      });
+      closePlayer();
       router.push({ pathname: '/artists/[id]', params: { id: artistId } });
     },
-    [expandedProgress],
+    [closePlayer],
   );
   const openAlbum = useCallback(
     (releaseId: string) => {
-      expandedProgress.value = withTiming(0, { duration: 220 }, finished => {
-        if (finished) scheduleOnRN(setIsPlayerExpanded, false);
-      });
+      closePlayer();
       setAlbumFilter(releaseId);
       router.navigate('/songs');
     },
-    [expandedProgress],
+    [closePlayer],
   );
   // Docked card above the tab bar, with the same insets and radius it always
   // had. The progress line is the only addition.
@@ -377,6 +383,7 @@ export default function TabsLayout() {
               artistLinks={playingArtistLinks}
               album={playingAlbum}
               artworkUri={playingArtworkUri}
+              queueLabel={queueLabel}
               trackKey={currentUri}
               artworkSize={Math.min(windowWidth - 64, layoutHeight * 0.44)}
               isPlaying={isPlaying}
@@ -390,6 +397,12 @@ export default function TabsLayout() {
               onToggle={() => void togglePlayback()}
               onNext={() => void playNext()}
               onSeek={seekTo}
+              onCollapse={closePlayer}
+              onAddToPlaylist={
+                currentSong
+                  ? () => setPlaylistSongId(currentSong.id)
+                  : undefined
+              }
               onOpenArtist={openArtist}
               onOpenAlbum={openAlbum}
               queueTracks={queueTracks}
@@ -402,6 +415,16 @@ export default function TabsLayout() {
           </Animated.View>
         </Animated.View>
       ) : null}
+
+      {playlistSongId ? (
+        <PlaylistPicker
+          visible
+          songId={playlistSongId}
+          onClose={() => setPlaylistSongId(null)}
+          onResult={text => setSnackbar({ id: Date.now(), text })}
+        />
+      ) : null}
+      <Snackbar message={snackbar} onDismiss={() => setSnackbar(null)} />
 
       {isSearchOpen ? (
         <SearchOverlay
