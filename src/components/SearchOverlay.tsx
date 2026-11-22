@@ -25,6 +25,7 @@ import { useAudio } from '@/hooks/useAudio';
 import { useMaterialTheme } from '@/hooks/useMaterialTheme';
 import useMusicLocations from '@/hooks/useMusicLocation';
 import { setAlbumFilter } from '@/lib/albumFilter';
+import { foldForSearch } from '@/lib/search';
 import type { Artist } from '@/types/artists';
 import type { ReleaseSummary } from '@/types/releases';
 import type { Song } from '@/types/songs';
@@ -58,28 +59,28 @@ export function SearchOverlay({ initialScope, onClose }: SearchOverlayProps) {
   const [scope, setScope] = useState<SearchScope>(initialScope);
   const searchInputRef = useRef<TextInputInstance>(null);
 
-  const normalized = query.trim().toLowerCase();
+  const normalized = foldForSearch(query.trim());
 
   const songResults = useMemo(() => {
     if (!normalized) return [];
     return songs.filter(song => {
-      if (song.title.toLowerCase().includes(normalized)) return true;
+      if (foldForSearch(song.title).includes(normalized)) return true;
       const { artist } = getSongDisplayInfo(song, artistNameById);
-      return artist.toLowerCase().includes(normalized);
+      return foldForSearch(artist).includes(normalized);
     });
   }, [songs, artistNameById, normalized]);
 
   const artistResults = useMemo(() => {
     if (!normalized) return [];
     return artists.filter(artist =>
-      artist.name.toLowerCase().includes(normalized),
+      foldForSearch(artist.name).includes(normalized),
     );
   }, [artists, normalized]);
 
   const albumResults = useMemo(() => {
     if (!normalized) return [];
     return releases.filter(release =>
-      release.title.toLowerCase().includes(normalized),
+      foldForSearch(release.title).includes(normalized),
     );
   }, [releases, normalized]);
 
