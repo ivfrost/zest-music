@@ -49,6 +49,10 @@ const QUEUE_ROW_HEIGHT = 54;
 const QUEUE_PEEK_ROWS = 4;
 type QueueLevel = 'closed' | 'peek' | 'mid' | 'full';
 
+// Fine seek shows this many seconds across the bar, with a tick every 5 seconds.
+const FINE_WINDOW_SECONDS = 60;
+const FINE_TICK_SECONDS = 5;
+
 type QueueTrack = {
   queueIndex: number;
   uri: string;
@@ -122,8 +126,11 @@ function SeekBar({
   const latestFraction = useRef(0);
   const latestGestureDx = useRef(0);
   const fineStartFraction = useRef(0);
+  const fineCenterSeconds = useRef(0);
   const fineStartGestureDx = useRef(0);
   const fineScrubbingRef = useRef(false);
+  const [fineScrubbing, setFineScrubbing] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const pendingSeekFraction = useRef<number | null>(null);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingSeekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -132,6 +139,46 @@ function SeekBar({
       ? Math.min(1, Math.max(0, positionSeconds / durationSeconds))
       : 0;
   const displayedFraction = draftFraction ?? progress;
+  const displayedRef = useRef(displayedFraction);
+  displayedRef.current = displayedFraction;
+  const barFreezeFraction = useRef(0);
+  // The bar holds the pre-press position until lift.
+  const barFraction = dragging
+    ? barFreezeFraction.current
+    : displayedFraction;
+  const fineSpanSeconds = Math.min(FINE_WINDOW_SECONDS, durationSeconds);
+  const fineSpanRef = useRef(fineSpanSeconds);
+  fineSpanRef.current = fineSpanSeconds;
+  // Centered on the reference second at any position, so ticks can fall outside.
+  const fineWindowStart = fineCenterSeconds.current - fineSpanSeconds / 2;
+  const fineWindowRef = useRef({ start: 0, end: 0 });
+  fineWindowRef.current = {
+    start: fineWindowStart,
+    end: fineWindowStart + fineSpanSeconds,
+  };
+  const fineMarker =
+    fineSpanSeconds > 0
+      ? (displayedFraction * durationSeconds - fineWindowStart) /
+        fineSpanSeconds
+      : 0;
+  // Ticks are offsets from the reference second, so they stay symmetric.
+  const fineTicks: { offset: number; label: string }[] = [];
+  if (fineScrubbing && fineSpanSeconds > 0) {
+    // The outermost ticks stay one step inside, so their labels are not clipped.
+    const steps = Math.floor(
+      (fineSpanSeconds / 2 - FINE_TICK_SECONDS) / FINE_TICK_SECONDS,
+    );
+    for (let step = -steps; step <= steps; step += 1) {
+      if (step === 0) continue;
+      const delta = step * FINE_TICK_SECONDS;
+      const time = fineCenterSeconds.current + delta;
+      if (time < 0 || time > durationSeconds) continue;
+      fineTicks.push({
+        offset: 0.5 + delta / fineSpanSeconds,
+        label: `${delta > 0 ? '+' : ''}${delta}`,
+      });
+    }
+  }
   const lastTickRef = useRef<number | null>(null);
 
   widthRef.current = trackWidth;
@@ -171,11 +218,24 @@ function SeekBar({
   const clampFraction = (fraction: number) =>
     Math.min(1, Math.max(0, fraction));
   const scheduleFineScrub = () => {
+    if (fineScrubbingRef.current) return;
     clearHoldTimer();
     holdTimer.current = setTimeout(() => {
-      fineStartFraction.current = latestFraction.current;
+      // A hold without a drag anchors on the seek position from the press.
+      const moved = Math.abs(latestGestureDx.current) > 8;
+      const seconds = Math.round(
+        (moved ? latestFraction.current : barFreezeFraction.current) *
+          durationRef.current,
+      );
+      const fraction = seconds / Math.max(1, durationRef.current);
+      fineCenterSeconds.current = seconds;
+      fineStartFraction.current = fraction;
+      latestFraction.current = fraction;
       fineStartGestureDx.current = latestGestureDx.current;
       fineScrubbingRef.current = true;
+      setFineScrubbing(true);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      setDraftFraction(fraction);
     }, 400);
   };
 
@@ -196,6 +256,7 @@ function SeekBar({
           pendingSeekFraction.current = null;
           if (pendingSeekTimer.current) clearTimeout(pendingSeekTimer.current);
           pendingSeekTimer.current = null;
+          barFreezeFraction.current = displayedRef.current;
           const fraction = clampFraction(
             event.nativeEvent.locationX / Math.max(1, widthRef.current),
           );
@@ -204,6 +265,8 @@ function SeekBar({
           lastTickRef.current = tickFor(fraction);
           latestGestureDx.current = 0;
           fineScrubbingRef.current = false;
+          setFineScrubbing(false);
+          setDragging(true);
           setDraftFraction(fraction);
           scheduleFineScrub();
         },
@@ -212,17 +275,26 @@ function SeekBar({
           const rawFraction = clampFraction(
             fineScrubbingRef.current
               ? fineStartFraction.current +
-                  ((gesture.dx - fineStartGestureDx.current) * 0.18) /
-                    Math.max(1, widthRef.current)
+                  ((gesture.dx - fineStartGestureDx.current) /
+                    Math.max(1, widthRef.current)) *
+                    (fineSpanRef.current /
+                      Math.max(1, durationRef.current))
               : startFraction.current +
                   gesture.dx / Math.max(1, widthRef.current),
           );
-          const fraction = fineScrubbingRef.current
-            ? clampFraction(
-                Math.round(rawFraction * durationRef.current) /
-                  Math.max(1, durationRef.current),
-              )
-            : rawFraction;
+          let fraction = rawFraction;
+          if (fineScrubbingRef.current) {
+            const start = Math.max(0, fineWindowRef.current.start);
+            const end = Math.min(
+              durationRef.current,
+              fineWindowRef.current.end,
+            );
+            fraction =
+              Math.min(
+                end,
+                Math.max(start, Math.round(rawFraction * durationRef.current)),
+              ) / Math.max(1, durationRef.current);
+          }
           latestFraction.current = fraction;
           const tick = tickFor(fraction);
           if (fineScrubbingRef.current && tick !== lastTickRef.current) {
@@ -244,6 +316,8 @@ function SeekBar({
           setDraftFraction(fraction);
           onSeekRef.current(fraction * durationRef.current);
           fineScrubbingRef.current = false;
+          setFineScrubbing(false);
+          setDragging(false);
           if (pendingSeekTimer.current) clearTimeout(pendingSeekTimer.current);
           pendingSeekTimer.current = setTimeout(() => {
             pendingSeekFraction.current = null;
@@ -254,6 +328,8 @@ function SeekBar({
         onPanResponderTerminate: () => {
           clearHoldTimer();
           fineScrubbingRef.current = false;
+          setFineScrubbing(false);
+          setDragging(false);
           pendingSeekFraction.current = null;
           if (pendingSeekTimer.current) clearTimeout(pendingSeekTimer.current);
           pendingSeekTimer.current = null;
@@ -305,7 +381,9 @@ function SeekBar({
         }}
         className="h-8 justify-end"
       >
+        {/* Bar must be the touch target, or locationX is thumb-relative. */}
         <View
+          pointerEvents="none"
           className="absolute left-0 right-0 h-1.5 overflow-hidden rounded-md3-full"
           style={{
             top: '50%',
@@ -316,22 +394,76 @@ function SeekBar({
           <View
             className="h-full rounded-md3-full"
             style={{
-              width: `${displayedFraction * 100}%`,
+              width: `${barFraction * 100}%`,
               backgroundColor: colors.primary,
             }}
           />
         </View>
         <View
+          pointerEvents="none"
           className="absolute h-3.5 w-3.5 rounded-md3-full"
           style={{
             top: '50%',
-            left: `${displayedFraction * 100}%`,
+            left: `${barFraction * 100}%`,
             transform: [{ translateY: -6 }],
             marginLeft: -7,
             backgroundColor: colors.primary,
             opacity: durationSeconds > 0 ? 1 : 0,
           }}
         />
+        {fineScrubbing ? (
+          <View
+            pointerEvents="none"
+            className="absolute left-0 right-0 overflow-hidden rounded-md3-full"
+            style={{
+              top: -30,
+              height: 22,
+              backgroundColor: colors.surfaceContainerHigh,
+            }}
+          >
+            {fineTicks.map(tick => (
+              <Fragment key={tick.label}>
+                <View
+                  className="absolute rounded-md3-full"
+                  style={{
+                    left: `${tick.offset * 100}%`,
+                    top: 2,
+                    width: 1,
+                    height: 5,
+                    backgroundColor: colors.onSurfaceVariant,
+                  }}
+                />
+                <Text
+                  numberOfLines={1}
+                  style={{
+                    position: 'absolute',
+                    left: `${tick.offset * 100}%`,
+                    top: 8,
+                    width: 26,
+                    marginLeft: -13,
+                    textAlign: 'center',
+                    fontSize: 9,
+                    color: colors.onSurfaceVariant,
+                    opacity: 0.6,
+                  }}
+                >
+                  {tick.label}
+                </Text>
+              </Fragment>
+            ))}
+            <View
+              className="absolute rounded-md3-full"
+              style={{
+                left: `${fineMarker * 100}%`,
+                top: 0,
+                marginLeft: -2,
+                width: 4,
+                height: '100%',
+                backgroundColor: colors.primary,
+              }}
+            />
+          </View>
+        ) : null}
       </View>
       <View className="flex-row justify-between">
         <Text className="text-body-small text-on-surface-variant">
